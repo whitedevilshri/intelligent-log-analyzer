@@ -1,0 +1,52 @@
+{
+  "experiment": "R1_masked_tfidf",
+  "masking": {
+    "block_ids": "BLOCK_ID",
+    "ipv4_addresses": "IP_ADDR",
+    "numbers": "NUMBER"
+  },
+  "text_preprocessing": [
+    "lowercase",
+    "remove punctuation",
+    "NLTK word tokenization",
+    "English stopword removal",
+    "WordNet lemmatization"
+  ],
+  "fitted_on": "train.csv only",
+  "label_mapping": {
+    "Normal": 0,
+    "Anomaly": 1
+  },
+  "vocabulary_size": 828,
+  "matrix_shapes": {
+    "train": [
+      5081,
+      828
+    ],
+    "validation": [
+      1271,
+      828
+    ],
+    "test": [
+      1588,
+      828
+    ]
+  },
+  "mask_counts": {
+    "train": {
+      "block_ids": 67181,
+      "ip_addresses": 61258,
+      "numbers": 95964
+    },
+    "validation": {
+      "block_ids": 16788,
+      "ip_addresses": 15163,
+      "numbers": 23967
+    },
+    "test": {
+      "block_ids": 20869,
+      "ip_addresses": 18897,
+      "numbers": 29896
+    }
+  }
+}

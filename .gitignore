@@ -1,0 +1,51 @@
+# Python environments and caches
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# IDE settings
+.idea/
+.vscode/
+
+# Logs and generated audit reports
+*.log
+/python-backend/root_cause_candidate_rejection_details.csv
+
+# Java build output
+**/target/
+**/build/
+**/dist/
+*.class
+
+# Datasets
+/data/raw/
+/data/processed/HDFS_trace_labeled_dataset.csv
+/data/processed/splits/
+
+# Generated TF-IDF artifacts
+/data/processed/features/tfidf_masked/*
+!/data/processed/features/tfidf_masked/tfidf_vectorizer.joblib
+!/data/processed/features/tfidf_masked/metadata.json
+/data/processed/features/tfidf_raw/*
+
+# Other models and generated evaluation outputs
+/data/processed/model_results/isolation_forest/*
+/data/processed/model_results/logistic_regression/*
+/data/processed/model_results/final_evaluation/*
+
+# Keep the production R1 model and threshold
+/data/processed/model_results/isolation_forest_masked/*
+!/data/processed/model_results/isolation_forest_masked/model.joblib
+!/data/processed/model_results/isolation_forest_masked/metrics.json
+
+# Machine-specific generated classpath
+/ingestion-java/classpath.txt

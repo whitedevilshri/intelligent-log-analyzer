@@ -1,0 +1,20 @@
+{
+  "experiment": "R1_masked_tfidf_isolation_forest",
+  "n_estimators": 200,
+  "contamination": "auto",
+  "random_state": 42,
+  "threshold_selection": "validation F1",
+  "anomaly_score_threshold": -0.1543060505094772,
+  "validation": {
+    "samples": 1271,
+    "roc_auc": 0.7936691236691236,
+    "pr_auc_average_precision": 0.5629943632014951,
+    "precision": 0.9615384615384616,
+    "recall": 0.5,
+    "f1": 0.6578947368421053,
+    "tn": 1220,
+    "fp": 1,
+    "fn": 25,
+    "tp": 25
+  }
+}
