@@ -1,5 +1,5 @@
 import csv
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -175,55 +175,54 @@ def analyze_block(block_id: str) -> dict:
                 "level": level,
                 "event_id": event_id,
                 "template": template,
-                "message": content,
+                "message": str(content or ""),
             }
         )
+
+    # Sort by actual parsed event time when every timestamp is valid.
+    # If any timestamp is invalid, preserve source LineId order instead of
+    # partially reordering the trace with incomplete timing information.
+    timestamps_complete = all(event["timestamp"] is not None for event in events)
+    if timestamps_complete:
+        events.sort(key=lambda event: (event["timestamp"], event["line_id"]))
+        sequence_ordering = "timestamp_then_line_id"
+    else:
+        events.sort(key=lambda event: event["line_id"])
+        sequence_ordering = "line_id_fallback_due_to_unparseable_timestamp"
+
+    # Stable sequence positions are used for before/after checks. LineId is
+    # retained as the source reference, but does not define time when timestamps
+    # are available.
+    for sequence_index, event in enumerate(events):
+        event["sequence_index"] = sequence_index
 
     # ---------------------------------------------------------
     # 1. Describe expected processing markers in this trace.
     # ---------------------------------------------------------
+    observed_event_ids = {event["event_id"] for event in events}
+    observed_markers = sorted(REFERENCE_MARKER_IDS & observed_event_ids)
+    missing_markers = sorted(REFERENCE_MARKER_IDS - observed_event_ids)
 
-    # Describe expected processing markers across the trace
-    # and specifically after the final E7 exception.
-    reference_markers = {"E9", "E26", "E11"}
-
-    observed_event_ids = {
-        event["event_id"] for event in events
-    }
-
-    observed_markers = sorted(
-        reference_markers & observed_event_ids
-    )
-
-    missing_markers = sorted(
-        reference_markers - observed_event_ids
-    )
-
-    e7_events_for_processing = [
-        event for event in events
+    e7_positions = [
+        index for index, event in enumerate(events)
         if event["event_id"] == "E7"
     ]
-
+    last_e7_position = e7_positions[-1] if e7_positions else None
     last_e7_line_id = (
-        e7_events_for_processing[-1]["line_id"]
-        if e7_events_for_processing
+        events[last_e7_position]["line_id"]
+        if last_e7_position is not None
         else None
     )
 
-    if last_e7_line_id is not None:
+    if last_e7_position is not None:
+        events_after_last_e7 = events[last_e7_position + 1:]
         observed_after_last_e7 = sorted({
-            event["event_id"]
-            for event in events
-            if (
-                event["line_id"] > last_e7_line_id
-                and event["event_id"] in reference_markers
-            )
+            event["event_id"] for event in events_after_last_e7
+            if event["event_id"] in REFERENCE_MARKER_IDS
         })
-
         missing_after_last_e7 = sorted(
-            reference_markers - set(observed_after_last_e7)
+            REFERENCE_MARKER_IDS - set(observed_after_last_e7)
         )
-
         after_last_e7_status = (
             "all_reference_markers_observed_after_last_E7"
             if not missing_after_last_e7
@@ -235,20 +234,20 @@ def analyze_block(block_id: str) -> dict:
         after_last_e7_status = "no_E7_event_in_trace"
 
     processing_evidence = {
-        "reference_markers": sorted(reference_markers),
+        "reference_markers": sorted(REFERENCE_MARKER_IDS),
         "observed_markers_anywhere": observed_markers,
         "missing_markers_anywhere": missing_markers,
         "last_e7_line_id": last_e7_line_id,
         "observed_after_last_e7": observed_after_last_e7,
         "missing_after_last_e7": missing_after_last_e7,
         "sequence_status": after_last_e7_status,
+        "sequence_ordering": sequence_ordering,
         "interpretation": (
             "Marker presence or absence is a dataset-derived signal. "
             "Events after an exception do not prove recovery, and "
             "missing events do not prove the underlying cause."
         ),
     }
-
 
     # ---------------------------------------------------------
     # 2. Describe observed exception and timeout evidence.
@@ -283,16 +282,14 @@ def analyze_block(block_id: str) -> dict:
         )
 
     if e7_events:
-        # The final E7 in LineId order is used for follow-up inspection.
-        # This is sequence-based, not proof of causal order.
+        # Events are chronologically ordered when all timestamps are parseable.
+        # This sequence is descriptive evidence, not proof of causal order.
         last_e7 = e7_events[-1]
+        last_e7_position = last_e7["sequence_index"]
         follow_up_events = [
             event
-            for event in events
-            if (
-                event["line_id"] > last_e7["line_id"]
-                and event["event_id"] in FOLLOW_UP_EVENT_IDS
-            )
+            for event in events[last_e7_position + 1:]
+            if event["event_id"] in FOLLOW_UP_EVENT_IDS
         ]
         follow_up_event_ids = sorted(
             {event["event_id"] for event in follow_up_events}
@@ -392,17 +389,68 @@ def analyze_block(block_id: str) -> dict:
             },
         )
 
+    def anchor_event_check(event_id: str) -> dict:
+        """Explain whether an observed event type can anchor analysis."""
+        stats = profile.get(
+            event_id,
+            {
+                "anomaly_blocks": 0,
+                "normal_blocks": 0,
+                "anomaly_rate": 0.0,
+                "normal_rate": 0.0,
+                "prevalence_difference": 0.0,
+            },
+        )
+        rejection_reasons = []
+        if stats["anomaly_blocks"] < MIN_ANOMALY_SUPPORT:
+            rejection_reasons.append("below_minimum_anomaly_support")
+        if stats["prevalence_difference"] < MIN_PREVALENCE_DIFFERENCE:
+            rejection_reasons.append("below_minimum_prevalence_difference")
+
+        return {
+            "event_id": event_id,
+            "training_anomaly_blocks": stats["anomaly_blocks"],
+            "training_normal_blocks": stats["normal_blocks"],
+            "training_anomaly_rate": round(stats["anomaly_rate"], 4),
+            "training_normal_rate": round(stats["normal_rate"], 4),
+            "prevalence_difference": round(stats["prevalence_difference"], 4),
+            "eligible_as_anchor": not rejection_reasons,
+            "rejection_reasons": rejection_reasons,
+        }
+
+    observed_event_types = sorted({event["event_id"] for event in events})
+    anchor_event_checks = [
+        anchor_event_check(event_id) for event_id in observed_event_types
+    ]
+    eligible_anchor_ids = [
+        check["event_id"]
+        for check in anchor_event_checks
+        if check["eligible_as_anchor"]
+    ]
+    anchor_selection = {
+        "status": (
+            "eligible_anchor_found"
+            if eligible_anchor_ids
+            else "no_eligible_anchor"
+        ),
+        "minimum_anomaly_support": MIN_ANOMALY_SUPPORT,
+        "minimum_prevalence_difference": MIN_PREVALENCE_DIFFERENCE,
+        "eligible_event_ids": eligible_anchor_ids,
+        "event_type_checks": anchor_event_checks,
+        "selection_rule": (
+            "Choose the eligible event occurrence with the greatest training "
+            "prevalence difference; break ties by anomaly support and then "
+            "sequence position."
+        ),
+    }
+
     # ---------------------------------------------------------
     # 3. Select a discriminative anomaly anchor.
     # ---------------------------------------------------------
+    eligible_anchor_id_set = set(eligible_anchor_ids)
     eligible_indices = [
-        index
-        for index, event in enumerate(events)
-        if (
-            event_stats(event)["anomaly_blocks"] >= MIN_ANOMALY_SUPPORT
-            and event_stats(event)["prevalence_difference"]
-            >= MIN_PREVALENCE_DIFFERENCE
-        )
+        index for index, event in enumerate(events)
+        if event["event_id"] in eligible_anchor_id_set
     ]
 
     if not eligible_indices:
@@ -414,14 +462,28 @@ def analyze_block(block_id: str) -> dict:
                 "requirements for an anomaly anchor."
             ),
             "anchor_event": None,
+            "anchor_selection": anchor_selection,
             "diagnostic_findings": diagnostic_findings,
             "failure_evidence": failure_evidence,
             "processing_evidence": processing_evidence,
             "precursor_events": [],
             "root_cause_candidates": [],
+            "candidate_evaluations": [],
+            "candidate_screening_summary": {
+                "preceding_event_instances_evaluated": 0,
+                "eligible_candidate_instances": 0,
+                "rejected_candidate_instances": 0,
+                "rejection_reason_counts": {},
+                "minimum_anomaly_support": MIN_ANOMALY_SUPPORT,
+                "minimum_prevalence_difference": MIN_PREVALENCE_DIFFERENCE,
+                "maximum_time_gap_seconds": MAX_TIME_GAP_SECONDS,
+                "note": "No candidate instances can be screened without an eligible anchor event.",
+            },
             "preceding_context": [],
+            "event_ordering": sequence_ordering,
             "method_notes": [
-                "Event association is calculated using train.csv only.",
+                "Training labels from train.csv only are used to calculate event association.",
+                "Anchor eligibility is explained in anchor_selection.event_type_checks.",
                 "Common events are not selected as anomaly anchors.",
                 "Observed failure signatures are not proof of an underlying cause.",
                 "Processing-marker presence or absence is diagnostic evidence only.",
@@ -509,34 +571,56 @@ def analyze_block(block_id: str) -> dict:
     )
 
     candidates = []
+    candidate_evaluations = []
 
     for event in preceding:
-        # Repeated instances of the anchor event are not candidates.
-        if event["event_id"] == anchor["event_id"]:
-            continue
-
         stats = event_stats(event)
         timestamp = event["timestamp"]
         gap_seconds = None
+        rejection_reasons = []
 
-        if timestamp is not None and anchor_time is not None:
+        if event["event_id"] == anchor["event_id"]:
+            rejection_reasons.append("same_event_as_anchor")
+
+        if timestamp is None or anchor_time is None:
+            rejection_reasons.append("timestamp_unavailable")
+        else:
             gap_seconds = (anchor_time - timestamp).total_seconds()
-            if gap_seconds < 0 or gap_seconds > MAX_TIME_GAP_SECONDS:
-                continue
+            if gap_seconds < 0:
+                rejection_reasons.append("event_not_before_anchor")
+            elif gap_seconds > MAX_TIME_GAP_SECONDS:
+                rejection_reasons.append("outside_time_window")
 
-        # Require stronger support to avoid promoting rare patterns.
-        if (
-            stats["anomaly_blocks"] < MIN_ANOMALY_SUPPORT
-            or stats["prevalence_difference"] < MIN_PREVALENCE_DIFFERENCE
-        ):
+        if stats["anomaly_blocks"] < MIN_ANOMALY_SUPPORT:
+            rejection_reasons.append("below_minimum_anomaly_support")
+        if stats["prevalence_difference"] < MIN_PREVALENCE_DIFFERENCE:
+            rejection_reasons.append("below_minimum_prevalence_difference")
+
+        eligible_as_candidate = not rejection_reasons
+        evaluation = {
+            "line_id": event["line_id"],
+            "event_id": event["event_id"],
+            "component": event["component"],
+            "message": event["message"],
+            "seconds_before_anchor": gap_seconds,
+            "training_anomaly_blocks": stats["anomaly_blocks"],
+            "training_normal_blocks": stats["normal_blocks"],
+            "training_anomaly_rate": round(stats["anomaly_rate"], 4),
+            "training_normal_rate": round(stats["normal_rate"], 4),
+            "prevalence_difference": round(stats["prevalence_difference"], 4),
+            "minimum_anomaly_support": MIN_ANOMALY_SUPPORT,
+            "minimum_prevalence_difference": MIN_PREVALENCE_DIFFERENCE,
+            "maximum_time_gap_seconds": MAX_TIME_GAP_SECONDS,
+            "eligible_as_candidate": eligible_as_candidate,
+            "rejection_reasons": rejection_reasons,
+        }
+        candidate_evaluations.append(evaluation)
+
+        if not eligible_as_candidate:
             continue
 
         support_factor = min(1.0, stats["anomaly_blocks"] / 10.0)
-        temporal_factor = (
-            1.0 / (1.0 + gap_seconds / 30.0)
-            if gap_seconds is not None
-            else 0.5
-        )
+        temporal_factor = 1.0 / (1.0 + gap_seconds / 30.0)
         ranking_score = (
             stats["prevalence_difference"]
             * support_factor
@@ -553,12 +637,36 @@ def analyze_block(block_id: str) -> dict:
                 "seconds_before_anchor": gap_seconds,
                 "training_anomaly_blocks": stats["anomaly_blocks"],
                 "training_normal_blocks": stats["normal_blocks"],
-                "prevalence_difference": round(
-                    stats["prevalence_difference"], 4
-                ),
+                "prevalence_difference": round(stats["prevalence_difference"], 4),
                 "ranking_score": round(ranking_score, 6),
+                "ranking_score_is_probability": False,
             }
         )
+
+    rejection_reason_counts = Counter(
+        reason
+        for evaluation in candidate_evaluations
+        for reason in evaluation["rejection_reasons"]
+    )
+    candidate_screening_summary = {
+        "preceding_event_instances_evaluated": len(candidate_evaluations),
+        "eligible_candidate_instances": sum(
+            evaluation["eligible_as_candidate"]
+            for evaluation in candidate_evaluations
+        ),
+        "rejected_candidate_instances": sum(
+            not evaluation["eligible_as_candidate"]
+            for evaluation in candidate_evaluations
+        ),
+        "rejection_reason_counts": dict(sorted(rejection_reason_counts.items())),
+        "minimum_anomaly_support": MIN_ANOMALY_SUPPORT,
+        "minimum_prevalence_difference": MIN_PREVALENCE_DIFFERENCE,
+        "maximum_time_gap_seconds": MAX_TIME_GAP_SECONDS,
+        "note": (
+            "Rejection counts are per preceding event instance; a single "
+            "instance can have more than one rejection reason."
+        ),
+    }
 
     candidates.sort(
         key=lambda candidate: candidate["ranking_score"],
@@ -566,6 +674,9 @@ def analyze_block(block_id: str) -> dict:
     )
 
     candidate_line_ids = {candidate["line_id"] for candidate in candidates}
+    evaluation_by_line_id = {
+        evaluation["line_id"]: evaluation for evaluation in candidate_evaluations
+    }
 
     context_events = []
     for event in preceding:
@@ -590,6 +701,9 @@ def analyze_block(block_id: str) -> dict:
                     if event["line_id"] in candidate_line_ids
                     else "context_only"
                 ),
+                "candidate_rejection_reasons": evaluation_by_line_id.get(
+                    event["line_id"], {}
+                ).get("rejection_reasons", []),
             }
         )
 
@@ -610,6 +724,7 @@ def analyze_block(block_id: str) -> dict:
         "block_id": block_id,
         "root_cause_status": status,
         "summary": summary,
+        "anchor_selection": anchor_selection,
         "anchor_event": {
             "line_id": anchor["line_id"],
             "event_id": anchor["event_id"],
@@ -626,14 +741,19 @@ def analyze_block(block_id: str) -> dict:
         "processing_evidence": processing_evidence,
         "precursor_events": precursor_events,
         "root_cause_candidates": candidates,
+        "candidate_evaluations": candidate_evaluations,
+        "candidate_screening_summary": candidate_screening_summary,
         "preceding_context": context_events,
+        "event_ordering": sequence_ordering,
         "method_notes": [
             "Training labels from train.csv only are used to calculate event association.",
-            "Only preceding events from the same BlockId are considered for candidate ranking.",
+            "Only the preceding 10 event instances from the same BlockId are screened for candidates.",
+            "Candidate rejection reasons are reported in candidate_evaluations.",
+            "Event sequence uses parsed timestamps when all trace timestamps are valid; otherwise it falls back to LineId order.",
             "Common events and one-off training associations are not promoted to root-cause candidates.",
             "Failure signatures and follow-up events describe observed log evidence, not proof of causation or recovery.",
             "Processing-marker presence or absence is diagnostic evidence only.",
             "Ranking scores are heuristics, not probabilities or proof of causation.",
-            "This initial version does not yet correlate events across different BlockIds or components.",
+            "This correlator currently ranks same-BlockId precursors; cross-block correlation is not implemented in the production API.",
         ],
     }

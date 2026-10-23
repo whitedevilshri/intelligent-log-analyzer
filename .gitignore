@@ -49,3 +49,12 @@ venv/
 
 # Machine-specific generated classpath
 /ingestion-java/classpath.txt
+
+# Generated cross-block incident audit reports
+/python-backend/incident_audit_reports/
+
+# Corrected incident audit reports
+/python-backend/incident_audit_reports_v2/
+
+# Incident time coverage audit reports
+/python-backend/incident_audit_reports_v3/
