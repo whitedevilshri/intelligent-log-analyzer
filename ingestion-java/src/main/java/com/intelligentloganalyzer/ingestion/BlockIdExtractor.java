@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 public final class BlockIdExtractor {
 
     private static final Pattern BLOCK_ID_PATTERN =
-            Pattern.compile("blk_-?\\d+");
+            Pattern.compile("(?<![A-Za-z0-9_])blk_-?\\d+(?![A-Za-z0-9_])");
 
     private BlockIdExtractor() {
     }

@@ -174,6 +174,62 @@ class AnalyzeBlockTests(unittest.TestCase):
         self.assertEqual(len(report["preceding_context"]), 1)
         self.assertEqual(report["preceding_context"][0]["event_id"], "E5")
 
+    def test_follow_up_events_use_timestamp_order_not_line_id(self):
+        # LineId order disagrees with clock order. E9 has a lower LineId than
+        # the E7 anchor but a later timestamp, so it must still be reported as
+        # follow-up activity when every timestamp is valid.
+        rows = [
+            row(100, "203503", "E9", "Received block"),
+            row(101, "203501", "E7", "writeBlock received exception java.io.EOFException"),
+            row(102, "203502", "E26", "blockMap updated"),
+        ]
+        report = self.analyze_with_rows("blk_followup_order", rows)
+
+        self.assertEqual(report["event_ordering"], "timestamp_then_line_id")
+        self.assertEqual(report["anchor_event"]["line_id"], 101)
+        self.assertEqual(
+            [item["line_id"] for item in report["failure_evidence"]["follow_up_events"]],
+            [102, 100],
+        )
+        self.assertEqual(
+            report["failure_evidence"]["follow_up_event_ids"], ["E26", "E9"]
+        )
+        self.assertEqual(
+            report["processing_evidence"]["observed_after_last_e7"], ["E26", "E9"]
+        )
+
+    def test_unparseable_timestamp_fallback_rejects_event_actually_after_anchor(self):
+        # An invalid timestamp forces LineId fallback. The candidate appears
+        # earlier by LineId, but its parseable timestamp is later than E7, so
+        # it must not be ranked as a precursor.
+        profile = profile_for_tests()
+        profile["E2"] = {
+            "anomaly_blocks": 30,
+            "normal_blocks": 1,
+            "anomaly_rate": 0.15,
+            "normal_rate": 1 / 4881,
+            "prevalence_difference": 0.15 - (1 / 4881),
+        }
+        rows = [
+            row(100, "203503", "E2", "Candidate-like event"),
+            row(101, "203502", "E7", "writeBlock received exception java.io.EOFException"),
+            row(102, "invalid", "E5", "Receiving block"),
+        ]
+        with patch.object(correlator, "load_training_event_profile", return_value=profile), \
+             patch.object(correlator, "get_connection", return_value=FakeConnection(rows)):
+            report = correlator.analyze_block("blk_fallback_order")
+
+        self.assertEqual(
+            report["event_ordering"], "line_id_fallback_due_to_unparseable_timestamp"
+        )
+        self.assertEqual(report["anchor_event"]["event_id"], "E7")
+        self.assertEqual(report["root_cause_candidates"], [])
+        evaluations = {
+            item["line_id"]: item for item in report["candidate_evaluations"]
+        }
+        self.assertEqual(evaluations[100]["seconds_before_anchor"], -1.0)
+        self.assertIn("event_not_before_anchor", evaluations[100]["rejection_reasons"])
+
     def test_empty_block_raises_value_error(self):
         with self.assertRaisesRegex(ValueError, "No structured log events found"):
             self.analyze_with_rows("blk_missing", [])
