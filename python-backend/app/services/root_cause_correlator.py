@@ -453,14 +453,61 @@ def analyze_block(block_id: str) -> dict:
         if event["event_id"] in eligible_anchor_id_set
     ]
 
+
     if not eligible_indices:
+        summary_parts = []
+
+        failure_events = failure_evidence.get("failure_events", [])
+        signatures = sorted({
+            event["signature"]
+            for event in failure_events
+            if event.get("signature")
+        })
+
+        if signatures:
+            summary_parts.append(
+                "Observed failure signature(s): "
+                + ", ".join(signatures) + "."
+            )
+
+        line_ids = sorted({
+            event["line_id"]
+            for event in failure_events
+            if event.get("line_id") is not None
+        })
+
+        if line_ids:
+            summary_parts.append(
+                "Failure event line ID(s): "
+                + ", ".join(map(str, line_ids)) + "."
+            )
+
+        missing_markers = processing_evidence.get(
+            "missing_markers_anywhere", []
+        )
+
+        if missing_markers:
+            summary_parts.append(
+                "Reference processing markers not observed in this trace: "
+                + ", ".join(missing_markers) + "."
+            )
+
+        if failure_evidence.get("sequence_observation") == (
+            "no_selected_follow_up_events_observed"
+        ):
+            summary_parts.append(
+                "No selected follow-up events were observed."
+            )
+
+        summary_parts.append(
+            "No event met the minimum training-evidence requirements "
+            "for an anomaly anchor; root cause remains undetermined."
+        )
+
         return {
             "block_id": block_id,
             "root_cause_status": "insufficient_evidence",
-            "summary": (
-                "No event in this trace meets the minimum training-evidence "
-                "requirements for an anomaly anchor."
-            ),
+            "summary": " ".join(summary_parts),
             "anchor_event": None,
             "anchor_selection": anchor_selection,
             "diagnostic_findings": diagnostic_findings,
@@ -477,7 +524,10 @@ def analyze_block(block_id: str) -> dict:
                 "minimum_anomaly_support": MIN_ANOMALY_SUPPORT,
                 "minimum_prevalence_difference": MIN_PREVALENCE_DIFFERENCE,
                 "maximum_time_gap_seconds": MAX_TIME_GAP_SECONDS,
-                "note": "No candidate instances can be screened without an eligible anchor event.",
+                "note": (
+                    "No candidate instances can be screened without "
+                    "an eligible anchor event."
+                ),
             },
             "preceding_context": [],
             "event_ordering": sequence_ordering,
@@ -715,10 +765,55 @@ def analyze_block(block_id: str) -> dict:
         )
     else:
         status = "insufficient_evidence"
-        summary = (
-            "No preceding event met the minimum evidence requirements. "
-            "The root cause remains undetermined from this trace."
+        summary_parts = []
+
+        anchor_event_id = anchor.get("event_id")
+        if anchor_event_id:
+            summary_parts.append(
+                f"Selected anomaly anchor: {anchor_event_id}."
+            )
+
+        failure_events = failure_evidence.get("failure_events", [])
+        signatures = sorted({
+            event["signature"]
+            for event in failure_events
+            if event.get("signature")
+        })
+
+        if signatures:
+            summary_parts.append(
+                "Observed failure signature(s): "
+                + ", ".join(signatures) + "."
+            )
+
+        line_ids = sorted({
+            event["line_id"]
+            for event in failure_events
+            if event.get("line_id") is not None
+        })
+
+        if line_ids:
+            summary_parts.append(
+                "Failure event line ID(s): "
+                + ", ".join(map(str, line_ids)) + "."
+            )
+
+        missing_markers = processing_evidence.get(
+            "missing_markers_anywhere", []
         )
+
+        if missing_markers:
+            summary_parts.append(
+                "Reference processing markers not observed in this trace: "
+                + ", ".join(missing_markers) + "."
+            )
+
+        summary_parts.append(
+            "No preceding event met the minimum evidence requirements "
+            "for a root-cause candidate; root cause remains undetermined."
+        )
+
+        summary = " ".join(summary_parts)
 
     return {
         "block_id": block_id,

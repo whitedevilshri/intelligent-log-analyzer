@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-10-25T17:44:52+05:30",
+  "model_name": "R1_masked_tfidf_isolation_forest",
+  "anomaly_score_definition": "negative Isolation Forest decision_function; higher means more anomalous",
+  "threshold": -0.1543060505094772,
+  "threshold_source": "validation set metrics file",
+  "database_counts": {
+    "all_traces": 7941,
+    "labeled_traces": 7940,
+    "unlabeled_traces": 1,
+    "r1_prediction_rows_all_traces": 7941,
+    "r1_distinct_predicted_traces_all_traces": 7941
+  },
+  "report_scope": {
+    "labeled_trace_count": 7940,
+    "unlabeled_trace_count_excluded": 1,
+    "predicted_anomaly_count": 151,
+    "predicted_normal_count": 7789,
+    "anomaly_diagnostic_rows": 151,
+    "anomaly_diagnostic_errors": 0
+  },
+  "actual_label_counts": {
+    "Normal": 7627,
+    "Anomaly": 313
+  },
+  "predicted_label_counts": {
+    "Normal": 7789,
+    "Anomaly": 151
+  },
+  "full_labeled_dataset_confusion_matrix_descriptive_only": {
+    "true_positive": 147,
+    "false_negative": 166,
+    "false_positive": 4,
+    "true_negative": 7623
+  },
+  "full_dataset_metrics_note": "These counts describe stored predictions over all labeled traces; they are not an independent held-out evaluation. See the separate held-out test metrics for official evaluation results.",
+  "diagnostic_status_counts": {
+    "insufficient_evidence": 151
+  },
+  "root_cause_candidates_reported_total": 0,
+  "diagnostic_errors": [],
+  "held_out_test_evaluation": {
+    "experiment": "R1_masked_tfidf_isolation_forest",
+    "threshold_source": "validation set",
+    "threshold": -0.1543060505094772,
+    "test_samples": 1588,
+    "roc_auc": 0.6829560239396305,
+    "pr_auc_average_precision": 0.4526198830340957,
+    "precision": 1.0,
+    "recall": 0.38095238095238093,
+    "f1": 0.5517241379310345,
+    "tn": 1525,
+    "fp": 0,
+    "fn": 39,
+    "tp": 24
+  },
+  "held_out_test_metrics_file_available": true
+}

@@ -111,8 +111,15 @@ class ParseAndClassificationTests(unittest.TestCase):
 
 class AnalyzeBlockTests(unittest.TestCase):
     def analyze_with_rows(self, block_id, rows):
-        with patch.object(correlator, "load_training_event_profile", return_value=profile_for_tests()), \
-             patch.object(correlator, "get_connection", return_value=FakeConnection(rows)):
+        with patch.object(
+            correlator,
+            "load_training_event_profile",
+            return_value=profile_for_tests(),
+        ), patch.object(
+            correlator,
+            "get_connection",
+            return_value=FakeConnection(rows),
+        ):
             return correlator.analyze_block(block_id)
 
     def test_normal_trace_has_no_anchor_or_root_cause(self):
@@ -122,86 +129,229 @@ class AnalyzeBlockTests(unittest.TestCase):
             row(3, "203502", "E26", "blockMap updated"),
             row(4, "203503", "E9", "Received block"),
         ]
+
         report = self.analyze_with_rows("blk_normal", rows)
 
-        self.assertEqual(report["root_cause_status"], "insufficient_evidence")
+        self.assertEqual(
+            report["root_cause_status"],
+            "insufficient_evidence",
+        )
         self.assertIsNone(report["anchor_event"])
         self.assertEqual(report["root_cause_candidates"], [])
         self.assertEqual(report["diagnostic_findings"], [])
-        self.assertEqual(report["processing_evidence"]["missing_markers_anywhere"], [])
-        self.assertEqual(report["event_ordering"], "timestamp_then_line_id")
+        self.assertEqual(
+            report["processing_evidence"]["missing_markers_anywhere"],
+            [],
+        )
+        self.assertEqual(
+            report["event_ordering"],
+            "timestamp_then_line_id",
+        )
+
+    def test_no_anchor_summary_includes_observed_failure_evidence(self):
+        profile = profile_for_tests()
+        profile["E7"]["prevalence_difference"] = 0.0
+
+        rows = [
+            row(
+                12,
+                "203502",
+                "E7",
+                "writeBlock received exception java.io.EOFException",
+            ),
+        ]
+
+        with patch.object(
+            correlator,
+            "load_training_event_profile",
+            return_value=profile,
+        ), patch.object(
+            correlator,
+            "get_connection",
+            return_value=FakeConnection(rows),
+        ):
+            report = correlator.analyze_block("blk_no_anchor_failure")
+
+        self.assertEqual(
+            report["root_cause_status"],
+            "insufficient_evidence",
+        )
+        self.assertIsNone(report["anchor_event"])
+        self.assertEqual(report["root_cause_candidates"], [])
+
+        self.assertIn(
+            "unexpected_end_of_stream",
+            report["summary"],
+        )
+        self.assertIn(
+            "Failure event line ID(s): 12",
+            report["summary"],
+        )
+        self.assertIn("E11, E26, E9", report["summary"])
+        self.assertIn(
+            "root cause remains undetermined",
+            report["summary"],
+        )
 
     def test_exception_trace_explains_rejected_preceding_events(self):
         rows = [
             row(10, "203500", "E5", "Receiving block blk_anomaly"),
-            row(11, "203501", "E14", "Exception: Connection reset by peer"),
-            row(12, "203502", "E7", "writeBlock received exception java.io.EOFException"),
-            row(13, "203503", "E7", "writeBlock received exception java.io.EOFException"),
+            row(
+                11,
+                "203501",
+                "E14",
+                "Exception: Connection reset by peer",
+            ),
+            row(
+                12,
+                "203502",
+                "E7",
+                "writeBlock received exception java.io.EOFException",
+            ),
+            row(
+                13,
+                "203503",
+                "E7",
+                "writeBlock received exception java.io.EOFException",
+            ),
             row(14, "203504", "E11", "PacketResponder terminating"),
             row(15, "203505", "E26", "blockMap updated"),
             row(16, "203506", "E9", "Received block"),
         ]
+
         report = self.analyze_with_rows("blk_anomaly", rows)
 
         self.assertEqual(report["anchor_event"]["event_id"], "E7")
-        self.assertEqual(report["event_ordering"], "timestamp_then_line_id")
-        self.assertEqual(report["root_cause_status"], "insufficient_evidence")
-        self.assertEqual(report["root_cause_candidates"], [])
-        self.assertGreaterEqual(len(report["candidate_evaluations"]), 1)
-
-        rejection_sets = [set(item["rejection_reasons"]) for item in report["candidate_evaluations"]]
-        self.assertTrue(any("below_minimum_prevalence_difference" in reasons for reasons in rejection_sets))
-        self.assertTrue(any("below_minimum_anomaly_support" in reasons for reasons in rejection_sets))
-        self.assertTrue(any("same_event_as_anchor" in reasons for reasons in rejection_sets))
         self.assertEqual(
-            report["candidate_screening_summary"]["eligible_candidate_instances"],
+            report["event_ordering"],
+            "timestamp_then_line_id",
+        )
+        self.assertEqual(
+            report["root_cause_status"],
+            "insufficient_evidence",
+        )
+        self.assertEqual(report["root_cause_candidates"], [])
+        self.assertGreaterEqual(
+            len(report["candidate_evaluations"]),
+            1,
+        )
+
+        rejection_sets = [
+            set(item["rejection_reasons"])
+            for item in report["candidate_evaluations"]
+        ]
+
+        self.assertTrue(
+            any(
+                "below_minimum_prevalence_difference" in reasons
+                for reasons in rejection_sets
+            )
+        )
+        self.assertTrue(
+            any(
+                "below_minimum_anomaly_support" in reasons
+                for reasons in rejection_sets
+            )
+        )
+        self.assertTrue(
+            any(
+                "same_event_as_anchor" in reasons
+                for reasons in rejection_sets
+            )
+        )
+        self.assertEqual(
+            report["candidate_screening_summary"][
+                "eligible_candidate_instances"
+            ],
             0,
         )
 
+        # Verify the improved summary for the anchored, no-candidate path.
+        self.assertIn(
+            "Selected anomaly anchor: E7.",
+            report["summary"],
+        )
+        self.assertIn(
+            "Observed failure signature(s):",
+            report["summary"],
+        )
+        self.assertIn(
+            "Failure event line ID(s):",
+            report["summary"],
+        )
+        self.assertIn(
+            "root cause remains undetermined",
+            report["summary"],
+        )
+
     def test_events_are_sorted_by_timestamp_when_available(self):
-        # The source rows deliberately arrive in LineId order that disagrees
-        # with clock order. The E7 at 20:35:02 should be selected as anchor.
+        # Source rows arrive in LineId order that disagrees with clock order.
         rows = [
             row(100, "203503", "E9", "Received block"),
-            row(101, "203502", "E7", "writeBlock received exception java.io.EOFException"),
+            row(
+                101,
+                "203502",
+                "E7",
+                "writeBlock received exception java.io.EOFException",
+            ),
             row(102, "203501", "E5", "Receiving block"),
         ]
+
         report = self.analyze_with_rows("blk_order", rows)
 
-        self.assertEqual(report["event_ordering"], "timestamp_then_line_id")
+        self.assertEqual(
+            report["event_ordering"],
+            "timestamp_then_line_id",
+        )
         self.assertEqual(report["anchor_event"]["event_id"], "E7")
         self.assertEqual(report["anchor_event"]["line_id"], 101)
         self.assertEqual(len(report["preceding_context"]), 1)
-        self.assertEqual(report["preceding_context"][0]["event_id"], "E5")
+        self.assertEqual(
+            report["preceding_context"][0]["event_id"],
+            "E5",
+        )
 
     def test_follow_up_events_use_timestamp_order_not_line_id(self):
-        # LineId order disagrees with clock order. E9 has a lower LineId than
-        # the E7 anchor but a later timestamp, so it must still be reported as
-        # follow-up activity when every timestamp is valid.
+        # E9 has a lower LineId than E7 but a later timestamp.
         rows = [
             row(100, "203503", "E9", "Received block"),
-            row(101, "203501", "E7", "writeBlock received exception java.io.EOFException"),
+            row(
+                101,
+                "203501",
+                "E7",
+                "writeBlock received exception java.io.EOFException",
+            ),
             row(102, "203502", "E26", "blockMap updated"),
         ]
+
         report = self.analyze_with_rows("blk_followup_order", rows)
 
-        self.assertEqual(report["event_ordering"], "timestamp_then_line_id")
+        self.assertEqual(
+            report["event_ordering"],
+            "timestamp_then_line_id",
+        )
         self.assertEqual(report["anchor_event"]["line_id"], 101)
         self.assertEqual(
-            [item["line_id"] for item in report["failure_evidence"]["follow_up_events"]],
+            [
+                item["line_id"]
+                for item in report["failure_evidence"]["follow_up_events"]
+            ],
             [102, 100],
         )
         self.assertEqual(
-            report["failure_evidence"]["follow_up_event_ids"], ["E26", "E9"]
+            report["failure_evidence"]["follow_up_event_ids"],
+            ["E26", "E9"],
         )
         self.assertEqual(
-            report["processing_evidence"]["observed_after_last_e7"], ["E26", "E9"]
+            report["processing_evidence"]["observed_after_last_e7"],
+            ["E26", "E9"],
         )
 
-    def test_unparseable_timestamp_fallback_rejects_event_actually_after_anchor(self):
+    def test_unparseable_timestamp_fallback_rejects_event_actually_after_anchor(
+        self,
+    ):
         # An invalid timestamp forces LineId fallback. The candidate appears
-        # earlier by LineId, but its parseable timestamp is later than E7, so
-        # it must not be ranked as a precursor.
+        # earlier by LineId, but its parseable timestamp is later than E7.
         profile = profile_for_tests()
         profile["E2"] = {
             "anomaly_blocks": 30,
@@ -210,32 +360,62 @@ class AnalyzeBlockTests(unittest.TestCase):
             "normal_rate": 1 / 4881,
             "prevalence_difference": 0.15 - (1 / 4881),
         }
+
         rows = [
             row(100, "203503", "E2", "Candidate-like event"),
-            row(101, "203502", "E7", "writeBlock received exception java.io.EOFException"),
+            row(
+                101,
+                "203502",
+                "E7",
+                "writeBlock received exception java.io.EOFException",
+            ),
             row(102, "invalid", "E5", "Receiving block"),
         ]
-        with patch.object(correlator, "load_training_event_profile", return_value=profile), \
-             patch.object(correlator, "get_connection", return_value=FakeConnection(rows)):
+
+        with patch.object(
+            correlator,
+            "load_training_event_profile",
+            return_value=profile,
+        ), patch.object(
+            correlator,
+            "get_connection",
+            return_value=FakeConnection(rows),
+        ):
             report = correlator.analyze_block("blk_fallback_order")
 
         self.assertEqual(
-            report["event_ordering"], "line_id_fallback_due_to_unparseable_timestamp"
+            report["event_ordering"],
+            "line_id_fallback_due_to_unparseable_timestamp",
         )
         self.assertEqual(report["anchor_event"]["event_id"], "E7")
         self.assertEqual(report["root_cause_candidates"], [])
+
         evaluations = {
-            item["line_id"]: item for item in report["candidate_evaluations"]
+            item["line_id"]: item
+            for item in report["candidate_evaluations"]
         }
-        self.assertEqual(evaluations[100]["seconds_before_anchor"], -1.0)
-        self.assertIn("event_not_before_anchor", evaluations[100]["rejection_reasons"])
+
+        self.assertEqual(
+            evaluations[100]["seconds_before_anchor"],
+            -1.0,
+        )
+        self.assertIn(
+            "event_not_before_anchor",
+            evaluations[100]["rejection_reasons"],
+        )
 
     def test_empty_block_raises_value_error(self):
-        with self.assertRaisesRegex(ValueError, "No structured log events found"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "No structured log events found",
+        ):
             self.analyze_with_rows("blk_missing", [])
 
     def test_empty_block_id_raises_value_error(self):
-        with self.assertRaisesRegex(ValueError, "BlockId must not be empty"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "BlockId must not be empty",
+        ):
             correlator.analyze_block(" ")
 
 

@@ -58,3 +58,7 @@ venv/
 
 # Incident time coverage audit reports
 /python-backend/incident_audit_reports_v3/
+
+# Generated anomaly reports containing dataset-derived log text
+/reports/final_anomaly_report.csv
+/reports/predicted_anomalies_diagnostics.csv
