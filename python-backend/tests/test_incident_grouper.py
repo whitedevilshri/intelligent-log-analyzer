@@ -132,7 +132,8 @@ class IncidentGrouperTests(unittest.TestCase):
 
 
 
-    def test_reports_overlapping_time_bounded_clusters(self):
+
+    def test_groups_by_fixed_utc_bucket_and_keeps_observed_span(self):
         reports = [
             make_report(
                 "A", "B",
@@ -153,12 +154,13 @@ class IncidentGrouperTests(unittest.TestCase):
 
         result = build_incident_groups(reports, incident_window_seconds=300)
 
-        self.assertEqual(result["cluster_count"], 2)
-        self.assertEqual(result["cluster_overlap_pair_count"], 1)
-        self.assertEqual(result["clusters_with_overlaps"], 2)
-        self.assertTrue(
-            all(len(group["overlapping_incident_ids"]) == 1
-                for group in result["incidents"])
+        self.assertEqual(result["cluster_count"], 1)
+        self.assertEqual(result["cluster_overlap_pair_count"], 0)
+        cluster = result["incidents"][0]
+        self.assertEqual(cluster["block_ids"], ["A", "B", "C", "D"])
+        self.assertEqual(cluster["time_range"]["duration_seconds"], 150.0)
+        self.assertEqual(
+            cluster["observed_event_range"]["duration_seconds"], 350.0
         )
 
 if __name__ == "__main__":

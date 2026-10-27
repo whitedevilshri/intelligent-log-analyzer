@@ -137,19 +137,26 @@ def build_incident_groups(
                     ),
                 }
 
-    # Group event-pair relationships by signature and temporal proximity.
-    by_signature: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for pair in unique_pairs.values():
-        by_signature[pair["signature"]].append(pair)
-
-    clusters: list[dict[str, Any]] = []
+    # Assign each unique pair to a deterministic UTC bucket using its midpoint.
+    # This partitions relationship evidence rather than generating many
+    # nearly-identical rolling windows.
+    by_bucket: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
     window = int(incident_window_seconds)
 
-    for signature, pairs in sorted(by_signature.items()):
-        signature_clusters: list[dict[str, Any]] = []
+    for raw_pair in unique_pairs.values():
+        pair = dict(raw_pair)
+        pair["relationship_time"] = (
+            pair["start"] + (pair["end"] - pair["start"]) / 2
+        )
+        bucket_index = int(pair["relationship_time"].timestamp() // window)
+        by_bucket[(pair["signature"], bucket_index)].append(pair)
 
+    clusters: list[dict[str, Any]] = []
+
+    for (signature, bucket_index), pairs in sorted(by_bucket.items()):
         pairs.sort(
             key=lambda pair: (
+                pair["relationship_time"],
                 pair["start"],
                 pair["end"],
                 pair["block_a"],
@@ -157,100 +164,81 @@ def build_incident_groups(
             )
         )
 
-        for pair in pairs:
-            pair_blocks = {pair["block_a"], pair["block_b"]}
+        # Each event pair is an edge between two BlockIds. Compute connected
+        # components within this signature and time bucket.
+        block_to_edges: dict[str, list[int]] = defaultdict(list)
+        for edge_index, pair in enumerate(pairs):
+            block_to_edges[pair["block_a"]].append(edge_index)
+            block_to_edges[pair["block_b"]].append(edge_index)
 
-            compatible = []
-            for cluster in signature_clusters:
-                overlaps_blocks = bool(
-                    cluster["block_ids"] & pair_blocks
-                )
-                combined_start = min(cluster["start"], pair["start"])
-                combined_end = max(cluster["end"], pair["end"])
-                fits_window = (
-                    combined_end - combined_start
-                ).total_seconds() <= window
+        unseen = set(range(len(pairs)))
+        bucket_start = datetime.fromtimestamp(
+            bucket_index * window, tz=timezone.utc
+        )
+        bucket_end = datetime.fromtimestamp(
+            (bucket_index + 1) * window, tz=timezone.utc
+        )
 
-                if overlaps_blocks and fits_window:
-                    compatible.append(cluster)
+        while unseen:
+            seed = min(unseen)
+            pending = [seed]
+            component_indices: list[int] = []
+            component_blocks: set[str] = set()
 
-            if not compatible:
-                signature_clusters.append({
-                    "signature": signature,
-                    "block_ids": pair_blocks.copy(),
-                    "start": pair["start"],
-                    "end": pair["end"],
-                    "pairs": [pair],
-                })
-                continue
-
-            # Prefer the closest compatible cluster.
-            compatible.sort(
-                key=lambda cluster: (
-                    min(
-                        abs((pair["start"] - cluster["end"]).total_seconds()),
-                        abs((cluster["start"] - pair["end"]).total_seconds()),
-                    ),
-                    cluster["start"],
-                )
-            )
-
-            chosen = compatible[0]
-            chosen["pairs"].append(pair)
-            chosen["block_ids"].update(pair_blocks)
-            chosen["start"] = min(chosen["start"], pair["start"])
-            chosen["end"] = max(chosen["end"], pair["end"])
-
-            # Merge additional touching clusters only if the overall
-            # time span still fits the configured incident window.
-            for other in compatible[1:]:
-                if other not in signature_clusters:
+            while pending:
+                edge_index = pending.pop()
+                if edge_index not in unseen:
                     continue
 
-                merged_start = min(chosen["start"], other["start"])
-                merged_end = max(chosen["end"], other["end"])
+                unseen.remove(edge_index)
+                component_indices.append(edge_index)
+                pair = pairs[edge_index]
 
-                if (merged_end - merged_start).total_seconds() > window:
-                    continue
+                for block_id in (pair["block_a"], pair["block_b"]):
+                    if block_id not in component_blocks:
+                        component_blocks.add(block_id)
+                        pending.extend(
+                            neighbour for neighbour in block_to_edges[block_id]
+                            if neighbour in unseen
+                        )
 
-                chosen["pairs"].extend(other["pairs"])
-                chosen["block_ids"].update(other["block_ids"])
-                chosen["start"] = merged_start
-                chosen["end"] = merged_end
-                signature_clusters.remove(other)
-
-        clusters.extend(signature_clusters)
+            component_pairs = [pairs[i] for i in sorted(component_indices)]
+            clusters.append({
+                "signature": signature,
+                "bucket_index": bucket_index,
+                "window_bucket_start": bucket_start,
+                "window_bucket_end": bucket_end,
+                "block_ids": component_blocks,
+                "start": min(p["relationship_time"] for p in component_pairs),
+                "end": max(p["relationship_time"] for p in component_pairs),
+                "observed_start": min(p["start"] for p in component_pairs),
+                "observed_end": max(p["end"] for p in component_pairs),
+                "pairs": component_pairs,
+            })
 
     clusters.sort(
         key=lambda cluster: (
             cluster["start"],
             cluster["signature"],
+            cluster["bucket_index"],
             sorted(cluster["block_ids"]),
         )
     )
 
     incidents = []
-
     for index, cluster in enumerate(clusters, start=1):
-        relationships: dict[tuple[str, str], list[dict[str, Any]]] = (
-            defaultdict(list)
-        )
-
+        relationships: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for pair in cluster["pairs"]:
-            relationships[
-                (pair["block_a"], pair["block_b"])
-            ].append(pair)
+            relationships[(pair["block_a"], pair["block_b"])].append(pair)
 
         relationship_rows = []
-        for (block_a, block_b), event_pairs in sorted(
-            relationships.items()
-        ):
+        for (block_a, block_b), event_pairs in sorted(relationships.items()):
             relationship_rows.append({
                 "block_a": block_a,
                 "block_b": block_b,
                 "matched_event_pair_count": len(event_pairs),
                 "nearest_time_gap_seconds": round(
-                    min(p["gap_seconds"] for p in event_pairs), 3
+                    min(pair["gap_seconds"] for pair in event_pairs), 3
                 ),
             })
 
@@ -261,46 +249,56 @@ def build_incident_groups(
             "block_count": len(cluster["block_ids"]),
             "correlation_edge_count": len(relationship_rows),
             "matched_event_pair_count": len(cluster["pairs"]),
+            # Relationship midpoint range is contained in one fixed window.
             "time_range": {
                 "start": cluster["start"].isoformat(),
                 "end": cluster["end"].isoformat(),
                 "duration_seconds": round(
-                    (cluster["end"] - cluster["start"]).total_seconds(),
+                    (cluster["end"] - cluster["start"]).total_seconds(), 3
+                ),
+            },
+            # The full event endpoints can span across a bucket boundary.
+            "observed_event_range": {
+                "start": cluster["observed_start"].isoformat(),
+                "end": cluster["observed_end"].isoformat(),
+                "duration_seconds": round(
+                    (cluster["observed_end"] - cluster["observed_start"]).total_seconds(),
                     3,
                 ),
             },
+            "window_bucket": {
+                "start": cluster["window_bucket_start"].isoformat(),
+                "end": cluster["window_bucket_end"].isoformat(),
+            },
             "relationships": relationship_rows,
+            "overlapping_incident_ids": [],
             "interpretation": (
-                "Potential incident association only; "
-                "not a confirmed common cause."
+                "Potential incident association only; not a confirmed common cause."
             ),
         })
 
-
+    # Report clusters whose full observed event ranges overlap and whose
+    # same-signature membership shares at least one BlockId.
     overlap_pair_count = 0
     overlapping_ids: dict[str, set[str]] = defaultdict(set)
 
     for index, left in enumerate(incidents):
-        left_blocks = set(left.get("block_ids", []))
-        left_range = left.get("time_range", {})
+        left_blocks = set(left["block_ids"])
+        left_range = left["observed_event_range"]
         left_start = datetime.fromisoformat(left_range["start"])
         left_end = datetime.fromisoformat(left_range["end"])
 
         for right in incidents[index + 1:]:
-            if left.get("failure_signature") != right.get("failure_signature"):
+            if left["failure_signature"] != right["failure_signature"]:
+                continue
+            if not left_blocks.intersection(right["block_ids"]):
                 continue
 
-            common_blocks = left_blocks.intersection(right.get("block_ids", []))
-            if not common_blocks:
-                continue
-
-            right_range = right.get("time_range", {})
+            right_range = right["observed_event_range"]
             right_start = datetime.fromisoformat(right_range["start"])
             right_end = datetime.fromisoformat(right_range["end"])
 
-            overlap_start = max(left_start, right_start)
-            overlap_end = min(left_end, right_end)
-            if overlap_end < overlap_start:
+            if min(left_end, right_end) < max(left_start, right_start):
                 continue
 
             overlap_pair_count += 1
@@ -315,6 +313,7 @@ def build_incident_groups(
     return {
         "analysis_type": "cross_block_incident_grouping",
         "incident_window_seconds": window,
+        "window_strategy": "fixed_utc_buckets_by_event_pair_midpoint",
         "incident_count": len(incidents),
         "cluster_count": len(incidents),
         "cluster_overlap_pair_count": overlap_pair_count,
@@ -324,7 +323,11 @@ def build_incident_groups(
         "skipped_pairs_missing_timestamps": skipped_missing_timestamps,
         "method_notes": [
             "Only matching classified failure signatures are grouped.",
-            "Groups are time-bounded correlation clusters; clusters may overlap in time and BlockId membership.",
+            "Each unique event pair is assigned to one fixed UTC bucket by its midpoint.",
+            "Connected BlockId components are calculated separately inside each bucket.",
+            "The relationship midpoint range stays within one configured bucket.",
+            "The full observed event range may cross bucket boundaries.",
+            "Blocks can recur in different time buckets; clusters are not proof of independent incidents.",
             "Reciprocal reports of the same event pair are deduplicated.",
             "Incident associations are not proof of a shared root cause.",
         ],

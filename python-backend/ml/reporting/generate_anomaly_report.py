@@ -508,7 +508,7 @@ def main() -> int:
     print(f"Labeled traces in full report: {len(full_rows)}")
     print(f"Predicted anomalies with diagnostic rows: {len(diagnostic_rows)}")
     print(f"Diagnostic errors recorded: {len(diagnostic_errors)}")
-    print("Potential incident groups generated:", incident_grouping.get("incident_count", 0))
+    print("Potential incident clusters generated:", incident_grouping.get("cluster_count", 0))
     print("Descriptive confusion matrix:", dict(confusion))
     print(f"Full report: {FULL_REPORT_PATH}")
     print(f"Diagnostics: {DIAGNOSTICS_PATH}")

@@ -497,6 +497,12 @@ def _render_incident_grouping(value: Any) -> str:
         time_range = incident.get("time_range", {})
         if not isinstance(time_range, dict):
             time_range = {}
+        observed_range = incident.get("observed_event_range", time_range)
+        if not isinstance(observed_range, dict):
+            observed_range = time_range
+        observed_start = html.escape(str(observed_range.get("start", "N/A")))
+        observed_end = html.escape(str(observed_range.get("end", "N/A")))
+        observed_duration = html.escape(str(observed_range.get("duration_seconds", "N/A")))
         blocks = incident.get("block_ids", [])
         if not isinstance(blocks, list):
             blocks = []
@@ -513,11 +519,13 @@ def _render_incident_grouping(value: Any) -> str:
             f"<td>{html.escape(block_text)}</td>"
             f"<td>{start} &ndash; {end}</td>"
             f"<td>{duration} s</td>"
+            f"<td>{observed_start} &ndash; {observed_end}</td>"
+            f"<td>{observed_duration} s</td>"
             f"<td>{edges} relationship(s) / {pairs} event pair(s)</td>"
             "</tr>"
         )
     body = "".join(rows) or (
-        '<tr><td colspan="6">No incident groups could be formed from the available evidence.</td></tr>'
+        '<tr><td colspan="8">No incident groups could be formed from the available evidence.</td></tr>'
     )
     unique_pairs = html.escape(str(report.get("unique_event_pair_count", 0)))
     skipped = html.escape(str(report.get("skipped_pairs_missing_timestamps", 0)))
@@ -541,7 +549,9 @@ def _render_incident_grouping(value: Any) -> str:
         "Clusters can overlap in time and BlockId membership; the cluster count is not a count of confirmed or independent incidents. "
         "These associations are investigation leads, not proof of a shared root cause.</p>"
         '<div class="table-wrap"><table class="evidence-table">'
-        '<thead><tr><th>Incident</th><th>Failure signature</th><th>Involved blocks</th>'
-        '<th>Time range (UTC)</th><th>Duration</th><th>Relationships / event pairs</th></tr></thead>'
+        '<thead><tr><th>Cluster</th><th>Failure signature</th><th>Involved blocks</th>'
+        '<th>Relationship midpoint range (UTC)</th><th>Anchor span</th>'
+        '<th>Observed event range (UTC)</th><th>Observed span</th>'
+        '<th>Relationships / event pairs</th></tr></thead>'
         f"<tbody>{body}</tbody></table></div></section>"
     )
