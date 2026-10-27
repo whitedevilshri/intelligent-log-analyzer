@@ -163,5 +163,52 @@ class IncidentGrouperTests(unittest.TestCase):
             cluster["observed_event_range"]["duration_seconds"], 350.0
         )
 
+
+    def test_exact_bucket_boundary_separates_clusters(self):
+        reports = [
+            make_report(
+                "A", "B",
+                "2020-01-01T00:01:40Z",
+                "2020-01-01T00:03:20Z", 1, 2,
+            ),
+            make_report(
+                "A", "C",
+                "2020-01-01T00:03:20Z",
+                "2020-01-01T00:06:40Z", 3, 4,
+            ),
+        ]
+
+        result = build_incident_groups(reports, incident_window_seconds=300)
+
+        self.assertEqual(result["cluster_count"], 2)
+        buckets = {
+            item["window_bucket"]["start"]
+            for item in result["incidents"]
+        }
+        self.assertEqual(len(buckets), 2)
+
+    def test_disconnected_blocks_stay_in_separate_clusters(self):
+        reports = [
+            make_report(
+                "A", "B",
+                "2020-01-01T00:00:00Z",
+                "2020-01-01T00:00:08Z", 1, 2,
+            ),
+            make_report(
+                "C", "D",
+                "2020-01-01T00:00:10Z",
+                "2020-01-01T00:00:18Z", 3, 4,
+            ),
+        ]
+
+        result = build_incident_groups(reports, incident_window_seconds=300)
+
+        self.assertEqual(result["cluster_count"], 2)
+        memberships = {
+            frozenset(item["block_ids"])
+            for item in result["incidents"]
+        }
+        self.assertEqual(memberships, {frozenset({"A", "B"}), frozenset({"C", "D"})})
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
