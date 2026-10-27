@@ -24,6 +24,7 @@ if str(PYTHON_BACKEND_ROOT) not in sys.path:
 from app.db.database import get_connection  # noqa: E402
 from app.services.root_cause_correlator import analyze_block  # noqa: E402
 from app.services.cross_block_correlator import correlate_block  # noqa: E402
+from app.services.incident_grouper import build_incident_groups  # noqa: E402
 from ml.reporting.anomaly_html_report import render_html_report  # noqa: E402
 
 MODEL_NAME = "R1_masked_tfidf_isolation_forest"
@@ -347,6 +348,7 @@ def main() -> int:
     candidate_count_total = 0
     cross_block_statuses: Counter[str] = Counter()
     cross_block_errors: list[dict[str, str]] = []
+    cross_block_reports: list[dict[str, Any]] = []
 
     print(f"Validated {len(records)} labeled traces and R1 predictions.")
     print(f"Threshold matches saved validation metadata: {threshold:.10f}")
@@ -386,12 +388,17 @@ def main() -> int:
                 "method_notes": ["Cross-block analysis failed; same-block diagnostics remain available."],
             }
             cross_block_errors.append({"block_id": record["block_id"], "error": cross_error})
+        cross_block_reports.append(cross_report)
         diag_row["cross_block_correlations_json"] = nested_json(cross_report)
         cross_block_statuses[str(cross_report.get("status", "unknown"))] += 1
         diagnostic_rows.append(diag_row)
 
         if index % 25 == 0 or index == len(anomalies):
             print(f"  Diagnostics processed: {index}/{len(anomalies)}")
+
+    incident_grouping = build_incident_groups(
+        cross_block_reports, incident_window_seconds=300
+    )
 
     test_metrics = load_json(HELD_OUT_TEST_METRICS_PATH)
     if test_metrics is not None and test_metrics.get("experiment") != MODEL_NAME:
@@ -440,6 +447,7 @@ def main() -> int:
         "diagnostic_errors": diagnostic_errors,
         "cross_block_status_counts": dict(sorted(cross_block_statuses.items())),
         "cross_block_errors": cross_block_errors,
+        "incident_grouping": incident_grouping,
         "held_out_test_evaluation": test_metrics,
         "held_out_test_metrics_file_available": test_metrics is not None,
         "html_report_file": HTML_REPORT_PATH.name,
@@ -457,6 +465,7 @@ def main() -> int:
     print(f"Labeled traces in full report: {len(full_rows)}")
     print(f"Predicted anomalies with diagnostic rows: {len(diagnostic_rows)}")
     print(f"Diagnostic errors recorded: {len(diagnostic_errors)}")
+    print("Potential incident groups generated:", incident_grouping.get("incident_count", 0))
     print("Descriptive confusion matrix:", dict(confusion))
     print(f"Full report: {FULL_REPORT_PATH}")
     print(f"Diagnostics: {DIAGNOSTICS_PATH}")

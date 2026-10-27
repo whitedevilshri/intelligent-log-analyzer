@@ -69,6 +69,8 @@ def render_html_report(
     anomaly_rate = anomaly_count / trace_count if trace_count else 0.0
     candidate_count = int(summary.get("root_cause_candidates_reported_total", 0))
     diagnostic_statuses = summary.get("diagnostic_status_counts", {})
+    incident_grouping = summary.get("incident_grouping", {})
+    incident_grouping_html = _render_incident_grouping(incident_grouping)
 
     evidence_terms = (
         "Observed failure signature", "Selected anomaly anchor",
@@ -219,6 +221,7 @@ def render_html_report(
 <p>Anomaly Detection &amp; Diagnostic Report. Prioritize traces using anomaly scores, then review recorded evidence. Correlations are investigation clues, not confirmed causal explanations.</p>
 <div class="hero-meta"><span><strong>Model:</strong> {model}</span><span><strong>Generated:</strong> {generated_at}</span><span><strong>Threshold:</strong> {html.escape(_number(threshold, 8))}</span></div></header>
 <div class="toolbar"><button type="button" onclick="window.print()">Print / Save as PDF</button></div>
+{incident_grouping_html}
 <section class="report-section"><div class="section-heading"><h2>Executive summary</h2><p>Scope: labeled traces only</p></div>
 <div class="kpis">
 <div class="kpi"><div class="label">Traces analyzed</div><div class="value">{trace_count:,}</div><div class="hint">{int(db_counts.get('unlabeled_traces', 0)):,} unlabeled trace excluded</div></div>
@@ -479,3 +482,54 @@ def _score_for_sort(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float("-inf")
+
+
+def _render_incident_grouping(value: Any) -> str:
+    """Render grouped cross-block associations without claiming causality."""
+    report = value if isinstance(value, dict) else {}
+    incidents = report.get("incidents", [])
+    if not isinstance(incidents, list):
+        incidents = []
+    rows = []
+    for incident in incidents:
+        if not isinstance(incident, dict):
+            continue
+        time_range = incident.get("time_range", {})
+        if not isinstance(time_range, dict):
+            time_range = {}
+        blocks = incident.get("block_ids", [])
+        if not isinstance(blocks, list):
+            blocks = []
+        block_text = ", ".join(str(x) for x in blocks) or "N/A"
+        start = html.escape(str(time_range.get("start", "N/A")))
+        end = html.escape(str(time_range.get("end", "N/A")))
+        duration = html.escape(str(time_range.get("duration_seconds", "N/A")))
+        edges = html.escape(str(incident.get("correlation_edge_count", 0)))
+        pairs = html.escape(str(incident.get("matched_event_pair_count", 0)))
+        rows.append(
+            "<tr>"
+            f"<td><code>{html.escape(str(incident.get('incident_id', 'N/A')))}</code></td>"
+            f"<td>{html.escape(str(incident.get('failure_signature', 'N/A')))}</td>"
+            f"<td>{html.escape(block_text)}</td>"
+            f"<td>{start} &ndash; {end}</td>"
+            f"<td>{duration} s</td>"
+            f"<td>{edges} relationship(s) / {pairs} event pair(s)</td>"
+            "</tr>"
+        )
+    body = "".join(rows) or (
+        '<tr><td colspan="6">No incident groups could be formed from the available evidence.</td></tr>'
+    )
+    unique_pairs = html.escape(str(report.get("unique_event_pair_count", 0)))
+    skipped = html.escape(str(report.get("skipped_pairs_missing_timestamps", 0)))
+    return (
+        '<section class="report-section" id="potential-incidents">'
+        '<div class="section-heading"><h2>Potential Incidents</h2>'
+        f"<p>{len(rows)} grouped incident(s)</p></div>"
+        '<p class="small-muted">Grouped from the cross-block associations collected for this report. '
+        f"Unique event pairs: {unique_pairs}. Pairs skipped for missing timestamps: {skipped}. "
+        "These groups are investigation leads, not proof of a shared root cause.</p>"
+        '<div class="table-wrap"><table class="evidence-table">'
+        '<thead><tr><th>Incident</th><th>Failure signature</th><th>Involved blocks</th>'
+        '<th>Time range (UTC)</th><th>Duration</th><th>Relationships / event pairs</th></tr></thead>'
+        f"<tbody>{body}</tbody></table></div></section>"
+    )
