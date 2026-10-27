@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-26T14:58:49+05:30",
+  "generated_at": "2026-10-27T20:24:21+05:30",
   "model_name": "R1_masked_tfidf_isolation_forest",
   "anomaly_score_definition": "negative Isolation Forest decision_function; higher means more anomalous",
   "threshold": -0.1543060505094772,
@@ -39,6 +39,11 @@
   },
   "root_cause_candidates_reported_total": 0,
   "diagnostic_errors": [],
+  "cross_block_status_counts": {
+    "correlations_found": 65,
+    "insufficient_evidence": 86
+  },
+  "cross_block_errors": [],
   "held_out_test_evaluation": {
     "experiment": "R1_masked_tfidf_isolation_forest",
     "threshold_source": "validation set",

@@ -139,6 +139,9 @@ def render_html_report(
         method_notes = _parse_json(row.get("method_notes_json"), [])
         event_ordering = str(row.get("event_ordering", "not_recorded"))
         search += " " + str(preceding_context).lower() + " " + str(candidate_evaluations).lower()
+        cross_block = _parse_json(row.get("cross_block_correlations_json"), {})
+        search += " " + str(cross_block).lower()
+        cross_block_html = _render_cross_block_correlations(cross_block)
         error = str(row.get("diagnostic_error", "") or "")
         error_html = (
             f'<p class="error-note"><strong>Diagnostic error:</strong> {html.escape(error)}</p>'
@@ -168,6 +171,7 @@ def render_html_report(
               {_evidence('Failure evidence', failure)}
               {_evidence('Processing evidence', processing)}
               {_evidence('Precursor events', precursors)}
+              {cross_block_html}
               {_evidence('Root-cause candidates', candidates)}
             </details>
           </td>
@@ -207,7 +211,7 @@ def render_html_report(
 .toolbar{{display:flex;justify-content:flex-end;margin:16px 0 24px}}button{{cursor:pointer;background:var(--navy);color:white;border:0;border-radius:10px;padding:10px 15px;font-weight:700}}.report-section{{margin-top:28px}}.section-heading{{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:14px}}h2{{font-size:23px;letter-spacing:-.025em;margin:0}}h3{{font-size:16px;margin:20px 0 10px}}.section-heading p{{margin:0;color:var(--muted);font-size:13px}}
 .card,.kpi{{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}}.card{{padding:20px}}.kpis{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}}.kpi{{padding:19px;min-width:0}}.label{{font-size:12px;color:var(--muted);font-weight:700}}.value{{font-weight:800;letter-spacing:-.04em;font-size:clamp(25px,3vw,36px);margin:5px 0 0}}.hint,.small-muted,.subtle-note{{color:var(--muted);font-size:12px}}.metric-grid{{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}}.metric{{border:1px solid var(--line);padding:14px;border-radius:13px;background:#fbfdff}}.metric span{{display:block;color:var(--muted);font-size:12px;min-height:36px}}.metric strong{{font-size:25px;letter-spacing:-.03em}}
 .warning-callout{{color:#744800;border:1px solid #f0d79f;background:var(--amber-bg);padding:16px 18px;border-radius:13px;margin:16px 0}}.matrix{{border-collapse:collapse;width:min(520px,100%);font-variant-numeric:tabular-nums}}.matrix th,.matrix td{{text-align:center;padding:11px 14px;border:1px solid var(--line)}}.matrix th{{background:#edf3f9;font-size:12px}}.matrix td{{background:white;font-size:16px;font-weight:800}}.status-row{{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}}.status-chip{{display:inline-flex;gap:6px;background:#eff3f8;border-radius:100px;padding:6px 10px;color:#3d526b;font-size:12px}}
-.table-toolbar{{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}}input[type=search]{{flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid #ccd7e5;background:white;font:inherit}}.table-count{{align-self:center;font-size:12px;color:var(--muted)}}.table-wrap{{overflow-x:auto;border-radius:14px;border:1px solid var(--line);background:white}}table.anomaly-table{{border-collapse:collapse;width:100%;min-width:1030px}}.anomaly-table th{{position:sticky;top:0;text-align:left;background:#edf3f9;color:#43566e;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:12px 10px;border-bottom:1px solid var(--line)}}.anomaly-table td{{padding:13px 10px;border-bottom:1px solid #e8edf4;vertical-align:top}}.rank-cell{{color:var(--muted);font-weight:700}}code{{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}}.badge{{display:inline-block;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;line-height:1.4}}.badge-review{{color:var(--amber);background:#fff0d2}}.badge-positive{{color:var(--green);background:var(--green-bg)}}.badge-neutral{{color:#465a72;background:#eef2f6}}.diagnostic-summary{{max-width:600px;margin:0 0 8px;font-size:13px}}details.trace-details{{margin-top:8px}}details.trace-details summary{{cursor:pointer;font-size:12px;color:var(--blue);font-weight:800;padding:4px 0}}.evidence-block{{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;background:#fbfdff}}.evidence-block h4{{margin:0 0 8px;font-size:13px}}.evidence-block pre{{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#263b52}}.log-text{{max-height:420px;overflow:auto}}.evidence-table{{border-collapse:collapse;width:100%;margin:10px 0;font-size:12px}}.evidence-table th,.evidence-table td{{border:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}}.evidence-table th{{background:#edf3f9;color:#43566e;font-size:10px;text-transform:uppercase;letter-spacing:.04em}}.evidence-table td.message-cell{{min-width:260px;white-space:pre-wrap;overflow-wrap:anywhere}}.evidence-table .anchor-row{{background:#fff6e6}}.screening-summary{{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}}.screening-summary span{{background:#eff3f8;border-radius:8px;padding:6px 9px;font-size:11px}}.error-note{{background:#fff0f0;color:#8d2525;padding:10px;border-radius:8px}}.footer{{margin-top:30px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:15px}}
+.table-toolbar{{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}}input[type=search]{{flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid #ccd7e5;background:white;font:inherit}}.table-count{{align-self:center;font-size:12px;color:var(--muted)}}.table-wrap{{overflow-x:auto;border-radius:14px;border:1px solid var(--line);background:white}}table.anomaly-table{{border-collapse:collapse;width:100%;min-width:1030px}}.anomaly-table th{{position:sticky;top:0;text-align:left;background:#edf3f9;color:#43566e;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:12px 10px;border-bottom:1px solid var(--line)}}.anomaly-table td{{padding:13px 10px;border-bottom:1px solid #e8edf4;vertical-align:top}}.rank-cell{{color:var(--muted);font-weight:700}}code{{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}}.badge{{display:inline-block;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;line-height:1.4}}.badge-review{{color:var(--amber);background:#fff0d2}}.badge-positive{{color:var(--green);background:var(--green-bg)}}.badge-neutral{{color:#465a72;background:#eef2f6}}.diagnostic-summary{{max-width:600px;margin:0 0 8px;font-size:13px}}details.trace-details{{margin-top:8px}}details.trace-details summary{{cursor:pointer;font-size:12px;color:var(--blue);font-weight:800;padding:4px 0}}.evidence-block{{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;background:#fbfdff}}.evidence-block h4{{margin:0 0 8px;font-size:13px}}.evidence-block pre{{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#263b52}}.log-text{{max-height:420px;overflow:auto}}.evidence-table{{border-collapse:collapse;width:100%;margin:10px 0;font-size:12px}}.evidence-table th,.evidence-table td{{border:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}}.evidence-table th{{background:#edf3f9;color:#43566e;font-size:10px;text-transform:uppercase;letter-spacing:.04em}}.evidence-table td.message-cell{{min-width:260px;white-space:pre-wrap;overflow-wrap:anywhere}}.evidence-table .anchor-row{{background:#fff6e6}}.screening-summary{{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}}.screening-summary span{{background:#eff3f8;border-radius:8px;padding:6px 9px;font-size:11px}}.cross-block-table td{{min-width:130px;white-space:normal;overflow-wrap:anywhere}}.cross-block-table td:nth-child(4){{min-width:300px}}.error-note{{background:#fff0f0;color:#8d2525;padding:10px;border-radius:8px}}.footer{{margin-top:30px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:15px}}
 @media(max-width:900px){{.kpis{{grid-template-columns:repeat(2,minmax(0,1fr))}}.metric-grid{{grid-template-columns:repeat(3,minmax(0,1fr))}}.hero{{padding:26px}}}}@media(max-width:560px){{.container{{width:calc(100% - 22px)}}.kpis,.metric-grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}.card{{padding:14px}}}}
 @media print{{body{{background:white}}.container{{width:100%;padding:0}}.hero{{border-radius:0;box-shadow:none;print-color-adjust:exact}}.toolbar,.table-toolbar{{display:none!important}}.card,.kpi{{box-shadow:none;break-inside:avoid}}.table-wrap{{overflow:visible}}table.anomaly-table{{min-width:0;font-size:9px}}.anomaly-table th,.anomaly-table td{{padding:6px 4px}}details.trace-details summary{{color:#111}}details.trace-details:not([open])>*{{display:none!important}}.evidence-block{{break-inside:avoid}}}}
 </style></head><body><div class="container">
@@ -400,6 +404,72 @@ def _render_candidate_evaluations(evaluations: Any, summary: Any) -> str:
         <p class="small-muted">An eligible event is only a candidate for ranking, not a confirmed cause. Rejection counts may count multiple reasons for one event.</p>
         <div class="screening-summary">{''.join(chips)}</div>
         {reason_html}{body}{note_html}
+      </section>
+    """
+
+
+
+def _render_cross_block_correlations(value: Any) -> str:
+    """Render cross-BlockId failure-signature associations without implying causality."""
+    report = value if isinstance(value, dict) else {}
+    status = str(report.get("status", "not_computed"))
+    reason = str(report.get("reason", "Cross-block analysis was not recorded."))
+    window = report.get("time_window_seconds", "N/A")
+    candidates = report.get("candidates", [])
+    candidates = candidates if isinstance(candidates, list) else []
+
+    rows = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        pairs = candidate.get("matched_event_pairs", [])
+        pairs = pairs if isinstance(pairs, list) else []
+        pair_text = []
+        for pair in pairs[:3]:
+            if not isinstance(pair, dict):
+                continue
+            target = pair.get("target_event") or {}
+            related = pair.get("related_event") or {}
+            target_id = target.get("event_id", "?")
+            related_id = related.get("event_id", "?")
+            target_line = target.get("line_id", "?")
+            related_line = related.get("line_id", "?")
+            target_message = str(target.get("message", ""))
+            related_message = str(related.get("message", ""))
+            pair_text.append(
+                f"<div><strong>{html.escape(str(target_id))} line {html.escape(str(target_line))}</strong>: "
+                f"{html.escape(target_message)}<br>↳ <strong>{html.escape(str(related_id))} line {html.escape(str(related_line))}</strong>: "
+                f"{html.escape(related_message)}</div>"
+            )
+        signatures = candidate.get("matched_signatures", [])
+        signature_text = ", ".join(str(s) for s in signatures) if signatures else "—"
+        rows.append(
+            "<tr>"
+            f"<td><code>{html.escape(str(candidate.get('related_block_id', '')))}</code></td>"
+            f"<td>{html.escape(str(candidate.get('nearest_time_gap_seconds', 'N/A')))} s</td>"
+            f"<td>{html.escape(signature_text)}</td>"
+            f"<td>{''.join(pair_text) or 'Matched event details unavailable.'}</td>"
+            "<td>Potential temporal association; not a confirmed cause.</td>"
+            "</tr>"
+        )
+
+    if rows:
+        body = f"""
+          <div class="table-wrap"><table class="evidence-table cross-block-table">
+            <thead><tr><th>Related Block ID</th><th>Nearest gap</th><th>Matched signature(s)</th><th>Observed event pair(s)</th><th>Interpretation</th></tr></thead>
+            <tbody>{''.join(rows)}</tbody>
+          </table></div>
+        """
+    else:
+        body = '<p>No matching cross-block events were returned for this trace.</p>'
+
+    return f"""
+      <section class="evidence-block cross-block-evidence">
+        <h4>Cross-block associations</h4>
+        <p class="small-muted"><strong>Status:</strong> {html.escape(status)} · <strong>Window:</strong> ±{html.escape(str(window))} seconds</p>
+        <p>{html.escape(reason)}</p>
+        <p class="small-muted">Matches require the same specific classified failure signature in a different BlockId within the time window. These are investigation clues, not proof of a shared incident or root cause.</p>
+        {body}
       </section>
     """
 

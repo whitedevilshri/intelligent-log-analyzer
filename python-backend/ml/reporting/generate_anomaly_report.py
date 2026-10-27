@@ -23,6 +23,7 @@ if str(PYTHON_BACKEND_ROOT) not in sys.path:
 
 from app.db.database import get_connection  # noqa: E402
 from app.services.root_cause_correlator import analyze_block  # noqa: E402
+from app.services.cross_block_correlator import correlate_block  # noqa: E402
 from ml.reporting.anomaly_html_report import render_html_report  # noqa: E402
 
 MODEL_NAME = "R1_masked_tfidf_isolation_forest"
@@ -86,6 +87,7 @@ DIAGNOSTIC_FIELDS = [
     "candidate_evaluations_json",
     "candidate_screening_summary_json",
     "diagnostic_error",
+    "cross_block_correlations_json",
 ]
 
 
@@ -343,6 +345,8 @@ def main() -> int:
     diagnostic_statuses: Counter[str] = Counter()
     diagnostic_errors: list[dict[str, str]] = []
     candidate_count_total = 0
+    cross_block_statuses: Counter[str] = Counter()
+    cross_block_errors: list[dict[str, str]] = []
 
     print(f"Validated {len(records)} labeled traces and R1 predictions.")
     print(f"Threshold matches saved validation metadata: {threshold:.10f}")
@@ -364,6 +368,26 @@ def main() -> int:
             diagnostic_errors.append(
                 {"block_id": record["block_id"], "error": error}
             )
+        # Cross-block association is independent from same-block diagnostics.
+        # Failures here are recorded per row and never hide the base report.
+        try:
+            cross_report = correlate_block(
+                record["block_id"], time_window_seconds=300, max_candidates=10
+            )
+        except Exception as cross_exc:
+            cross_error = f"{type(cross_exc).__name__}: {cross_exc}"
+            cross_report = {
+                "block_id": record["block_id"],
+                "status": "correlation_error",
+                "reason": cross_error,
+                "time_window_seconds": 300,
+                "total_matching_blocks": 0,
+                "candidates": [],
+                "method_notes": ["Cross-block analysis failed; same-block diagnostics remain available."],
+            }
+            cross_block_errors.append({"block_id": record["block_id"], "error": cross_error})
+        diag_row["cross_block_correlations_json"] = nested_json(cross_report)
+        cross_block_statuses[str(cross_report.get("status", "unknown"))] += 1
         diagnostic_rows.append(diag_row)
 
         if index % 25 == 0 or index == len(anomalies):
@@ -414,6 +438,8 @@ def main() -> int:
         "diagnostic_status_counts": dict(diagnostic_statuses),
         "root_cause_candidates_reported_total": candidate_count_total,
         "diagnostic_errors": diagnostic_errors,
+        "cross_block_status_counts": dict(sorted(cross_block_statuses.items())),
+        "cross_block_errors": cross_block_errors,
         "held_out_test_evaluation": test_metrics,
         "held_out_test_metrics_file_available": test_metrics is not None,
         "html_report_file": HTML_REPORT_PATH.name,

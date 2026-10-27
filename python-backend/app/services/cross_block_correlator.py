@@ -252,6 +252,16 @@ def correlate_block(
             JOIN log_event_blocks b ON b.line_id = e.line_id
             WHERE e.log_date = ANY(%s)
               AND b.block_id <> %s
+              AND (
+                  e.event_id = 'E7'
+                  OR LOWER(COALESCE(e.content, '')) LIKE '%%exception%%'
+                  OR LOWER(COALESCE(e.content, '')) LIKE '%%timeout%%'
+                  OR LOWER(COALESCE(e.content, '')) LIKE '%%timed out%%'
+                  OR LOWER(COALESCE(e.content, '')) LIKE '%%interrupted%%'
+                  OR LOWER(COALESCE(e.content, '')) LIKE '%%connection reset%%'
+                  OR LOWER(COALESCE(e.content, '')) LIKE '%%could not read from stream%%'
+                  OR LOWER(COALESCE(e.content, '')) LIKE '%%eofexception%%'
+              )
             ORDER BY e.log_date, e.log_time, e.line_id
             """,
             (log_dates, block_id),
