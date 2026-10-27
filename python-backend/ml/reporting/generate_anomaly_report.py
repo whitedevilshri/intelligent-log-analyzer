@@ -374,7 +374,7 @@ def main() -> int:
         # Failures here are recorded per row and never hide the base report.
         try:
             cross_report = correlate_block(
-                record["block_id"], time_window_seconds=300, max_candidates=10
+                record["block_id"], time_window_seconds=300, max_candidates=100
             )
         except Exception as cross_exc:
             cross_error = f"{type(cross_exc).__name__}: {cross_exc}"
@@ -388,8 +388,14 @@ def main() -> int:
                 "method_notes": ["Cross-block analysis failed; same-block diagnostics remain available."],
             }
             cross_block_errors.append({"block_id": record["block_id"], "error": cross_error})
+        # Group incidents using every returned candidate; keep per-row HTML compact.
         cross_block_reports.append(cross_report)
-        diag_row["cross_block_correlations_json"] = nested_json(cross_report)
+        display_report = dict(cross_report)
+        display_candidates = display_report.get("candidates", [])
+        if not isinstance(display_candidates, list):
+            display_candidates = []
+        display_report["candidates"] = display_candidates[:10]
+        diag_row["cross_block_correlations_json"] = nested_json(display_report)
         cross_block_statuses[str(cross_report.get("status", "unknown"))] += 1
         diagnostic_rows.append(diag_row)
 
@@ -399,6 +405,42 @@ def main() -> int:
     incident_grouping = build_incident_groups(
         cross_block_reports, incident_window_seconds=300
     )
+
+
+    coverage_rows = []
+    for cross_report in cross_block_reports:
+        candidates = cross_report.get("candidates", [])
+        if not isinstance(candidates, list):
+            candidates = []
+
+        raw_total = cross_report.get("total_matching_blocks")
+        try:
+            total = int(raw_total) if raw_total is not None else len(candidates)
+        except (TypeError, ValueError):
+            total = len(candidates)
+
+        returned = len(candidates)
+        coverage_rows.append({
+            "total": max(0, total),
+            "returned": returned,
+            "omitted": max(0, total - returned),
+        })
+
+    candidate_coverage = {
+        "cross_block_reports_collected": len(coverage_rows),
+        "candidate_limit_per_block": 100,
+        "matching_blocks_reported_total": sum(item["total"] for item in coverage_rows),
+        "candidate_rows_returned_total": sum(item["returned"] for item in coverage_rows),
+        "candidate_rows_omitted_total": sum(item["omitted"] for item in coverage_rows),
+        "blocks_with_candidate_omissions": sum(
+            item["omitted"] > 0 for item in coverage_rows
+        ),
+        "complete_for_collected_reports": (
+            not cross_block_errors
+            and all(item["omitted"] == 0 for item in coverage_rows)
+        ),
+    }
+    incident_grouping["candidate_coverage"] = candidate_coverage
 
     test_metrics = load_json(HELD_OUT_TEST_METRICS_PATH)
     if test_metrics is not None and test_metrics.get("experiment") != MODEL_NAME:
@@ -446,6 +488,7 @@ def main() -> int:
         "root_cause_candidates_reported_total": candidate_count_total,
         "diagnostic_errors": diagnostic_errors,
         "cross_block_status_counts": dict(sorted(cross_block_statuses.items())),
+        "cross_block_candidate_coverage": candidate_coverage,
         "cross_block_errors": cross_block_errors,
         "incident_grouping": incident_grouping,
         "held_out_test_evaluation": test_metrics,

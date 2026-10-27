@@ -20,6 +20,14 @@ class IncidentHtmlReportTests(unittest.TestCase):
                 "incident_count": 1,
                 "unique_event_pair_count": 1,
                 "skipped_pairs_missing_timestamps": 0,
+                "cluster_overlap_pair_count": 1,
+                "clusters_with_overlaps": 2,
+                "candidate_coverage": {
+                    "cross_block_reports_collected": 2,
+                    "candidate_rows_returned_total": 50,
+                    "candidate_rows_omitted_total": 0,
+                    "complete_for_collected_reports": True,
+                },
                 "incidents": [{
                     "incident_id": "INC-001",
                     "failure_signature": "stream_read_failure",
@@ -36,12 +44,14 @@ class IncidentHtmlReportTests(unittest.TestCase):
         }
 
         rendered = render_html_report(summary, [])
-        self.assertIn("Potential Incidents", rendered)
+        self.assertIn("Potential Incident Clusters", rendered)
         self.assertIn("INC-001", rendered)
         self.assertIn("stream_read_failure", rendered)
         self.assertIn("blk_A, blk_B", rendered)
         self.assertIn("8.0 s", rendered)
         self.assertIn("not proof of a shared root cause", rendered)
+        self.assertIn("Overlapping same-signature cluster pairs: 1", rendered)
+        self.assertIn("Candidate rows returned: 50; omitted: 0", rendered)
 
     def test_escapes_incident_values(self):
         summary = {

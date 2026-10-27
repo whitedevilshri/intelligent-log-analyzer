@@ -131,5 +131,35 @@ class IncidentGrouperTests(unittest.TestCase):
         )
 
 
+
+    def test_reports_overlapping_time_bounded_clusters(self):
+        reports = [
+            make_report(
+                "A", "B",
+                "2020-01-01T00:00:00Z",
+                "2020-01-01T00:03:20Z", 1, 2,
+            ),
+            make_report(
+                "A", "C",
+                "2020-01-01T00:00:10Z",
+                "2020-01-01T00:03:30Z", 3, 4,
+            ),
+            make_report(
+                "A", "D",
+                "2020-01-01T00:02:30Z",
+                "2020-01-01T00:05:50Z", 5, 6,
+            ),
+        ]
+
+        result = build_incident_groups(reports, incident_window_seconds=300)
+
+        self.assertEqual(result["cluster_count"], 2)
+        self.assertEqual(result["cluster_overlap_pair_count"], 1)
+        self.assertEqual(result["clusters_with_overlaps"], 2)
+        self.assertTrue(
+            all(len(group["overlapping_incident_ids"]) == 1
+                for group in result["incidents"])
+        )
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -276,16 +276,55 @@ def build_incident_groups(
             ),
         })
 
+
+    overlap_pair_count = 0
+    overlapping_ids: dict[str, set[str]] = defaultdict(set)
+
+    for index, left in enumerate(incidents):
+        left_blocks = set(left.get("block_ids", []))
+        left_range = left.get("time_range", {})
+        left_start = datetime.fromisoformat(left_range["start"])
+        left_end = datetime.fromisoformat(left_range["end"])
+
+        for right in incidents[index + 1:]:
+            if left.get("failure_signature") != right.get("failure_signature"):
+                continue
+
+            common_blocks = left_blocks.intersection(right.get("block_ids", []))
+            if not common_blocks:
+                continue
+
+            right_range = right.get("time_range", {})
+            right_start = datetime.fromisoformat(right_range["start"])
+            right_end = datetime.fromisoformat(right_range["end"])
+
+            overlap_start = max(left_start, right_start)
+            overlap_end = min(left_end, right_end)
+            if overlap_end < overlap_start:
+                continue
+
+            overlap_pair_count += 1
+            overlapping_ids[left["incident_id"]].add(right["incident_id"])
+            overlapping_ids[right["incident_id"]].add(left["incident_id"])
+
+    for incident in incidents:
+        incident["overlapping_incident_ids"] = sorted(
+            overlapping_ids.get(incident["incident_id"], set())
+        )
+
     return {
         "analysis_type": "cross_block_incident_grouping",
         "incident_window_seconds": window,
         "incident_count": len(incidents),
+        "cluster_count": len(incidents),
+        "cluster_overlap_pair_count": overlap_pair_count,
+        "clusters_with_overlaps": len(overlapping_ids),
         "incidents": incidents,
         "unique_event_pair_count": len(unique_pairs),
         "skipped_pairs_missing_timestamps": skipped_missing_timestamps,
         "method_notes": [
             "Only matching classified failure signatures are grouped.",
-            "Groups require connected BlockIds and a bounded time range.",
+            "Groups are time-bounded correlation clusters; clusters may overlap in time and BlockId membership.",
             "Reciprocal reports of the same event pair are deduplicated.",
             "Incident associations are not proof of a shared root cause.",
         ],

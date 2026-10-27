@@ -521,13 +521,25 @@ def _render_incident_grouping(value: Any) -> str:
     )
     unique_pairs = html.escape(str(report.get("unique_event_pair_count", 0)))
     skipped = html.escape(str(report.get("skipped_pairs_missing_timestamps", 0)))
+    overlap_pairs = html.escape(str(report.get("cluster_overlap_pair_count", 0)))
+    overlap_clusters = html.escape(str(report.get("clusters_with_overlaps", 0)))
+    coverage = report.get("candidate_coverage", {})
+    if not isinstance(coverage, dict):
+        coverage = {}
+    returned = html.escape(str(coverage.get("candidate_rows_returned_total", 0)))
+    omitted = html.escape(str(coverage.get("candidate_rows_omitted_total", 0)))
+    coverage_blocks = html.escape(str(coverage.get("cross_block_reports_collected", 0)))
+    coverage_status = "complete" if coverage.get("complete_for_collected_reports") is True else "incomplete or unknown"
     return (
         '<section class="report-section" id="potential-incidents">'
-        '<div class="section-heading"><h2>Potential Incidents</h2>'
-        f"<p>{len(rows)} grouped incident(s)</p></div>"
+        '<div class="section-heading"><h2>Potential Incident Clusters</h2>'
+        f"<p>{len(rows)} time-bounded cluster(s)</p></div>"
         '<p class="small-muted">Grouped from the cross-block associations collected for this report. '
         f"Unique event pairs: {unique_pairs}. Pairs skipped for missing timestamps: {skipped}. "
-        "These groups are investigation leads, not proof of a shared root cause.</p>"
+        f"Overlapping same-signature cluster pairs: {overlap_pairs}; clusters affected: {overlap_clusters}. "
+        f"Candidate rows returned: {returned}; omitted: {omitted} across {coverage_blocks} BlockId reports; coverage is {coverage_status}. "
+        "Clusters can overlap in time and BlockId membership; the cluster count is not a count of confirmed or independent incidents. "
+        "These associations are investigation leads, not proof of a shared root cause.</p>"
         '<div class="table-wrap"><table class="evidence-table">'
         '<thead><tr><th>Incident</th><th>Failure signature</th><th>Involved blocks</th>'
         '<th>Time range (UTC)</th><th>Duration</th><th>Relationships / event pairs</th></tr></thead>'
