@@ -62,3 +62,5 @@ venv/
 # Generated anomaly reports containing dataset-derived log text
 /reports/final_anomaly_report.csv
 /reports/predicted_anomalies_diagnostics.csv
+
+/reports/anomaly_report.html

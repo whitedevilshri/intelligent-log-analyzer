@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-25T17:44:52+05:30",
+  "generated_at": "2026-10-26T14:58:49+05:30",
   "model_name": "R1_masked_tfidf_isolation_forest",
   "anomaly_score_definition": "negative Isolation Forest decision_function; higher means more anomalous",
   "threshold": -0.1543060505094772,
@@ -54,5 +54,6 @@
     "fn": 39,
     "tp": 24
   },
-  "held_out_test_metrics_file_available": true
+  "held_out_test_metrics_file_available": true,
+  "html_report_file": "anomaly_report.html"
 }

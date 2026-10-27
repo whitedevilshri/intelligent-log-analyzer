@@ -739,6 +739,8 @@ def analyze_block(block_id: str) -> dict:
         context_events.append(
             {
                 "line_id": event["line_id"],
+                "log_date": str(event["log_date"]),
+                "log_time": str(event["log_time"]),
                 "event_id": event["event_id"],
                 "component": event["component"],
                 "message": event["message"],
@@ -822,6 +824,8 @@ def analyze_block(block_id: str) -> dict:
         "anchor_selection": anchor_selection,
         "anchor_event": {
             "line_id": anchor["line_id"],
+            "log_date": str(anchor["log_date"]),
+            "log_time": str(anchor["log_time"]),
             "event_id": anchor["event_id"],
             "component": anchor["component"],
             "template": anchor["template"],

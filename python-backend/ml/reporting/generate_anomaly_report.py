@@ -1,4 +1,4 @@
-"""Generate CSV and JSON anomaly reports from the existing PostgreSQL data.
+"""Generate CSV, JSON, and HTML anomaly reports from the existing PostgreSQL data.
 
 This script is read-only with respect to PostgreSQL. It does not retrain the
 R1 model, alter rows, or execute ingestion/labeling/loading operations.
@@ -23,6 +23,7 @@ if str(PYTHON_BACKEND_ROOT) not in sys.path:
 
 from app.db.database import get_connection  # noqa: E402
 from app.services.root_cause_correlator import analyze_block  # noqa: E402
+from ml.reporting.anomaly_html_report import render_html_report  # noqa: E402
 
 MODEL_NAME = "R1_masked_tfidf_isolation_forest"
 MODEL_METRICS_PATH = (
@@ -46,6 +47,7 @@ OUTPUT_DIR = PROJECT_ROOT / "reports"
 FULL_REPORT_PATH = OUTPUT_DIR / "final_anomaly_report.csv"
 DIAGNOSTICS_PATH = OUTPUT_DIR / "predicted_anomalies_diagnostics.csv"
 SUMMARY_PATH = OUTPUT_DIR / "anomaly_report_summary.json"
+HTML_REPORT_PATH = OUTPUT_DIR / "anomaly_report.html"
 
 FULL_REPORT_FIELDS = [
     "trace_id",
@@ -71,11 +73,15 @@ DIAGNOSTIC_FIELDS = [
     "is_correct",
     "root_cause_status",
     "diagnostic_summary",
+    "anchor_selection_json",
     "anchor_event_json",
     "diagnostic_findings_json",
     "failure_evidence_json",
     "processing_evidence_json",
     "precursor_events_json",
+    "preceding_context_json",
+    "event_ordering",
+    "method_notes_json",
     "root_cause_candidates_json",
     "candidate_evaluations_json",
     "candidate_screening_summary_json",
@@ -256,11 +262,15 @@ def make_diagnostic_row(
         "is_correct": record["actual_label"] == record["predicted_label"],
         "root_cause_status": source.get("root_cause_status", "diagnostic_error" if error else "unknown"),
         "diagnostic_summary": source.get("summary", ""),
+        "anchor_selection_json": nested_json(source.get("anchor_selection", {})),
         "anchor_event_json": nested_json(source.get("anchor_event")),
         "diagnostic_findings_json": nested_json(source.get("diagnostic_findings", [])),
         "failure_evidence_json": nested_json(source.get("failure_evidence", {})),
         "processing_evidence_json": nested_json(source.get("processing_evidence", {})),
         "precursor_events_json": nested_json(source.get("precursor_events", [])),
+        "preceding_context_json": nested_json(source.get("preceding_context", [])),
+        "event_ordering": source.get("event_ordering", "not_recorded"),
+        "method_notes_json": nested_json(source.get("method_notes", [])),
         "root_cause_candidates_json": nested_json(source.get("root_cause_candidates", [])),
         "candidate_evaluations_json": nested_json(source.get("candidate_evaluations", [])),
         "candidate_screening_summary_json": nested_json(source.get("candidate_screening_summary", {})),
@@ -278,11 +288,11 @@ def main() -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="overwrite the three report files if they already exist",
+        help="overwrite all generated report files if they already exist",
     )
     args = parser.parse_args()
 
-    output_paths = [FULL_REPORT_PATH, DIAGNOSTICS_PATH, SUMMARY_PATH]
+    output_paths = [FULL_REPORT_PATH, DIAGNOSTICS_PATH, SUMMARY_PATH, HTML_REPORT_PATH]
     existing = [path for path in output_paths if path.exists()]
     if existing and not args.force:
         print("Refusing to overwrite existing report file(s):", file=sys.stderr)
@@ -406,11 +416,16 @@ def main() -> int:
         "diagnostic_errors": diagnostic_errors,
         "held_out_test_evaluation": test_metrics,
         "held_out_test_metrics_file_available": test_metrics is not None,
+        "html_report_file": HTML_REPORT_PATH.name,
     }
 
     with SUMMARY_PATH.open("w", encoding="utf-8") as file:
         json.dump(summary, file, ensure_ascii=False, indent=2)
         file.write("\n")
+
+    html_content = render_html_report(summary, diagnostic_rows)
+    with HTML_REPORT_PATH.open("w", encoding="utf-8", newline="\n") as file:
+        file.write(html_content)
 
     print("\n=== ANOMALY REPORT GENERATION COMPLETE ===")
     print(f"Labeled traces in full report: {len(full_rows)}")
@@ -420,6 +435,7 @@ def main() -> int:
     print(f"Full report: {FULL_REPORT_PATH}")
     print(f"Diagnostics: {DIAGNOSTICS_PATH}")
     print(f"Summary: {SUMMARY_PATH}")
+    print(f"HTML report: {HTML_REPORT_PATH}")
     print("PostgreSQL data and R1 model artifacts were not modified.")
 
     return 0 if not diagnostic_errors else 1
