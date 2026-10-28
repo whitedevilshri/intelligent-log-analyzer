@@ -163,7 +163,7 @@ Generated files are saved under the repository's `reports/` directory:
 - `predicted_anomalies_diagnostics.csv` — diagnostic evidence for traces predicted as anomalous.
 - `anomaly_report_summary.json` — dataset counts, descriptive confusion matrix, diagnostic status counts, and the separate held-out test metrics.
 
-For the current report, 7,940 labeled traces were processed, including 151 predicted anomalies. All 151 diagnostic reports returned `insufficient_evidence`; no root-cause candidates were produced. This means the diagnostic engine did not find sufficient evidence under its current selection rules, not that the anomalies have no underlying causes.
+For the current report, 7,940 labeled traces were processed, including 151 predicted anomalies. All 151 root-cause diagnostic reports returned `insufficient_evidence`; no root-cause candidates were produced. Cross-block correlation is a separate analysis that can identify related events in other blocks. Such associations are investigation leads, not proof of root cause. Insufficient diagnostic evidence does not mean an anomaly has no underlying cause.
 
 The full-dataset confusion matrix is descriptive and must not be presented as an independent test evaluation. Use the separately recorded held-out test metrics when reporting model performance.
 
@@ -182,6 +182,8 @@ The detailed CSVs contain dataset-derived log text and are generated locally rat
 | GET | `/api/v1/predictions/history` | Read prediction history |
 | GET | `/api/v1/dashboard/summary` | Read dashboard summary statistics |
 | GET | `/api/v1/root-cause/blocks/{block_id}` | Retrieve diagnostic evidence |
+| GET | `/api/v1/root-cause/blocks/{block_id}/cross-block-correlations` | Retrieve cross-block correlation evidence |
+| POST | `/api/v1/root-cause/incidents` | Group cross-block associations into potential incident clusters |
 
 ## Automated Tests
 
@@ -197,7 +199,7 @@ Run Java tests from `ingestion-java`:
 mvn test
 ```
 
-At the current development checkpoint, 9 Python tests and 16 Java tests have passed. Rerun the suites after making changes.
+At the latest verified checkpoint, 41 Python tests and 16 Java tests passed. Rerun both suites after making changes.
 
 ## R1 Model
 
