@@ -39,7 +39,7 @@ class AnomalyCorrelationRenderingTests(unittest.TestCase):
         self.assertIn("2026-10-01 12:00:00", rendered)
         self.assertIn("5.000 s", rendered)
         self.assertIn("below_minimum_anomaly_support", rendered)
-        self.assertIn("cross-block correlation is not implemented", rendered.lower())
+        self.assertIn("cross-block relationships are summarized separately", rendered.lower())
 
     def test_timeline_escapes_untrusted_log_messages(self):
         rendered = _render_event_timeline(

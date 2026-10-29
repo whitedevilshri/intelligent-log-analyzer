@@ -853,6 +853,6 @@ def analyze_block(block_id: str) -> dict:
             "Failure signatures and follow-up events describe observed log evidence, not proof of causation or recovery.",
             "Processing-marker presence or absence is diagnostic evidence only.",
             "Ranking scores are heuristics, not probabilities or proof of causation.",
-            "This correlator currently ranks same-BlockId precursors; cross-block correlation is not implemented in the production API.",
+            "This correlator ranks same-BlockId precursors. Separate API endpoints analyze cross-block correlations and group potential incident clusters.",
         ],
     }

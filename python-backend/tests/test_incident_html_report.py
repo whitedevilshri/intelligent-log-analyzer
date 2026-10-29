@@ -51,8 +51,8 @@ class IncidentHtmlReportTests(unittest.TestCase):
         self.assertIn("8.0 s", rendered)
         self.assertIn("Relationship midpoint range (UTC)", rendered)
         self.assertIn("Observed event range (UTC)", rendered)
-        self.assertIn("not proof of a shared root cause", rendered)
-        self.assertIn("Overlapping same-signature cluster pairs: 1", rendered)
+        self.assertIn("do not prove a shared root cause", rendered)
+        self.assertIn("Overlapping same-signature group pairs: 1", rendered)
         self.assertIn("Candidate rows returned: 50; omitted: 0", rendered)
 
     def test_escapes_incident_values(self):

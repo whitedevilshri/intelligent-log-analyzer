@@ -221,7 +221,6 @@ def render_html_report(
 <p>Anomaly Detection &amp; Diagnostic Report. Prioritize traces using anomaly scores, then review recorded evidence. Correlations are investigation clues, not confirmed causal explanations.</p>
 <div class="hero-meta"><span><strong>Model:</strong> {model}</span><span><strong>Generated:</strong> {generated_at}</span><span><strong>Threshold:</strong> {html.escape(_number(threshold, 8))}</span></div></header>
 <div class="toolbar"><button type="button" onclick="window.print()">Print / Save as PDF</button></div>
-{incident_grouping_html}
 <section class="report-section"><div class="section-heading"><h2>Executive summary</h2><p>Scope: labeled traces only</p></div>
 <div class="kpis">
 <div class="kpi"><div class="label">Traces analyzed</div><div class="value">{trace_count:,}</div><div class="hint">{int(db_counts.get('unlabeled_traces', 0)):,} unlabeled trace excluded</div></div>
@@ -233,10 +232,12 @@ def render_html_report(
 <div class="warning-callout"><strong>Interpretation:</strong> test precision is {_percent(held_out.get('precision'))}; recall is {_percent(held_out.get('recall'))}. The model misses a substantial proportion of held-out anomalies at this threshold.</div>{descriptive_matrix}</div></section>
 <section class="report-section"><div class="section-heading"><h2>Diagnostic overview</h2><p>Evidence for predicted anomalies</p></div><div class="card"><div class="status-row">{status_html}</div>
 <p><strong>Summaries with specific observed evidence:</strong> {evidence_summary_count} of {len(diagnostic_rows)}.</p><p><strong>Root-cause candidates reported:</strong> {candidate_count}.</p><div class="warning-callout">{html.escape(causal_note)}</div></div></section>
+{incident_grouping_html}
 <section class="report-section"><div class="section-heading"><h2>Anomaly investigation queue</h2><p>{len(diagnostic_rows):,} predicted anomalies · highest score first</p></div>
+<details class="trace-details"><summary>Open detailed investigation queue ({len(diagnostic_rows):,} traces)</summary>
 <div class="table-toolbar"><input id="reportSearch" type="search" placeholder="Search BlockId, evidence, or log text…" aria-label="Search anomaly report"><span class="table-count" id="visibleCount">Showing {len(diagnostic_rows)} traces</span></div>
 <div class="table-wrap"><table class="anomaly-table"><thead><tr><th>#</th><th>Block ID / actual label</th><th>Score / threshold</th><th>Diagnostic status</th><th>Classification</th><th>Summary &amp; evidence</th></tr></thead><tbody id="anomalyRows">{''.join(table_rows) or '<tr><td colspan="6">No predicted anomalies found.</td></tr>'}</tbody></table></div>
-<p class="subtle-note">A higher anomaly score means the R1 model considers a trace more anomalous. It is not a calibrated probability of failure.</p></section>
+<p class="subtle-note">A higher anomaly score means the R1 model considers a trace more anomalous. It is not a calibrated probability of failure.</p></details></section>
 <footer class="footer">Generated from existing PostgreSQL predictions and saved R1 evaluation artifacts. This report does not retrain the model or alter database records. See <code>final_anomaly_report.csv</code> for all labeled traces, and <code>predicted_anomalies_diagnostics.csv</code> for full diagnostic fields.</footer>
 </div><script>(()=>{{const input=document.getElementById('reportSearch');const rows=Array.from(document.querySelectorAll('.anomaly-row'));const counter=document.getElementById('visibleCount');function filterRows(){{const q=input.value.trim().toLowerCase();let visible=0;for(const row of rows){{const match=!q||(row.dataset.search||'').includes(q);row.hidden=!match;if(match)visible++;}}counter.textContent=`Showing ${{visible}} of ${{rows.length}} traces`;}}input.addEventListener('input',filterRows);}})();</script></body></html>"""
 
@@ -321,7 +322,7 @@ def _render_event_timeline(
             '<p>No ordered context was returned for this trace. Regenerate the report '
             'after refreshing diagnostics if the source is expected to include it.</p>'
             '<p class="small-muted">This report currently shows same-BlockId context only; '
-            'cross-block correlation is not implemented.</p></section>'
+            'Cross-block relationships are summarized separately in the Potential Incident Clusters section when available.</p></section>'
         )
 
     return f"""
@@ -329,7 +330,7 @@ def _render_event_timeline(
         <h4>Correlated event timeline</h4>
         <p class="small-muted">Ordering: {ordering_text}. Events shown before the anchor belong to this BlockId.
         Temporal proximity and training association are investigation clues, not proof of causality.
-        Cross-block correlation is not implemented.</p>
+        Cross-block relationships are summarized separately in the Potential Incident Clusters section when available.</p>
         <div class="table-wrap"><table class="evidence-table">
           <thead><tr><th>Role</th><th>Timestamp</th><th>Line ID</th><th>Event ID</th><th>Component</th>
           <th>Seconds before anchor</th><th>Training prevalence difference</th><th>Screening</th><th>Observed message</th></tr></thead>
@@ -542,16 +543,19 @@ def _render_incident_grouping(value: Any) -> str:
         '<section class="report-section" id="potential-incidents">'
         '<div class="section-heading"><h2>Potential Incident Clusters</h2>'
         f"<p>{len(rows)} time-bounded cluster(s)</p></div>"
-        '<p class="small-muted">Grouped from the cross-block associations collected for this report. '
+        '<p class="small-muted">Related failure patterns were observed across different blocks near the same time. '
+        "These groups help organize evidence for review; they do not prove a shared root cause or confirm independent incidents.</p>"
+        '<details class="trace-details"><summary>View technical incident details</summary>'
+        '<p class="small-muted">'
         f"Unique event pairs: {unique_pairs}. Pairs skipped for missing timestamps: {skipped}. "
-        f"Overlapping same-signature cluster pairs: {overlap_pairs}; clusters affected: {overlap_clusters}. "
+        f"Overlapping same-signature group pairs: {overlap_pairs}; groups affected: {overlap_clusters}. "
         f"Candidate rows returned: {returned}; omitted: {omitted} across {coverage_blocks} BlockId reports; coverage is {coverage_status}. "
-        "Clusters can overlap in time and BlockId membership; the cluster count is not a count of confirmed or independent incidents. "
-        "These associations are investigation leads, not proof of a shared root cause.</p>"
+        "Groups may overlap in time and block membership."
+        '</p>'
         '<div class="table-wrap"><table class="evidence-table">'
         '<thead><tr><th>Cluster</th><th>Failure signature</th><th>Involved blocks</th>'
         '<th>Relationship midpoint range (UTC)</th><th>Anchor span</th>'
         '<th>Observed event range (UTC)</th><th>Observed span</th>'
         '<th>Relationships / event pairs</th></tr></thead>'
-        f"<tbody>{body}</tbody></table></div></section>"
+        f"<tbody>{body}</tbody></table></div></details></section>"
     )
